@@ -16,6 +16,8 @@ The workspace opens empty, including after a refresh. Select Open data to start 
 
 The version is displayed beside Check for updates. A newer release opens in a new tab so the current analysis stays open.
 
+When your browser provides a local file handle, CSV and Plot Launcher save dialogs start in the source file's folder. Other browsers use their normal download location.
+
 ## Build and publish
 
 Run `pnpm install --frozen-lockfile` and `pnpm build` to create a standalone `dist/XPS-Workbench.html`. Bump the version in `package.json` for a release. Run `pnpm build:pages` and push the `docs/` changes to `main` to publish through GitHub Pages.

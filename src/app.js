@@ -45,9 +45,18 @@ const fields = [
   ['mix', 'Lorentzian fraction (%)', 0, 1],
 ];
 const maxPeaks = 12;
+const spectrumFileType = {
+  description: 'Spectrum files',
+  accept: {
+    'text/csv': ['.csv'],
+    'text/plain': ['.tsv', '.txt', '.xy', '.dat', '.vms', '.vamas', '.npl'],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  },
+};
 function emptyProject() {
   return {
-    spectrum: null, dataset: null, points: [], original: [], offset: 0, range: [], zoom: [], method: 'shirley',
+    spectrum: null, dataset: null, sourceHandle: null, points: [], original: [], offset: 0,
+    range: [], zoom: [], method: 'shirley',
     view: 'raw', shiftMode: 'direct', pick: null, peaks: [], nextId: 0, result: null, preview: null,
     background: null, section: [], start: 0, disabledSeries: new Set(),
   };
@@ -267,8 +276,9 @@ function assignSpectrum(spectrum) {
   render();
 }
 
-function loadDataset(dataset) {
+function loadDataset(dataset, sourceHandle = null) {
   state.dataset = dataset;
+  state.sourceHandle = sourceHandle;
   const regions = dataset.regions || [];
   const select = byId('region');
   select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
@@ -357,10 +367,10 @@ function setRange(min, max) {
   render();
 }
 
-function sparseAligned(values, add = null) {
-  const result = new Array(state.points.length).fill(null);
+function sparseAligned(values, add = null, project = state) {
+  const result = new Array(project.points.length).fill(null);
   for (let i = 0; i < values.length; i++) {
-    result[state.start + i] = values[i] + (add ? add[i] : 0);
+    result[project.start + i] = values[i] + (add ? add[i] : 0);
   }
   return result;
 }
@@ -662,58 +672,110 @@ function runFit() {
   }
 }
 
-function exportData(plotLauncher) {
-  try {
-    const result = state.result;
-    const { energyScale, y, yUnit } = state.spectrum;
-    const originalX = state.original.map((point) => point.x);
-    const x = state.points.map((point) => point.x);
-    const { values: baseline } = state.background;
-    const corrected = sparseAligned(state.section.map((point, i) => point.y - baseline[i]));
-    const background = state.method !== 'none' || result ? sparseAligned(baseline) : undefined;
-    const fit = result ? sparseAligned(result.fit) : undefined;
-    const residual = result ? sparseAligned(result.residuals) : undefined;
-    const components = (result?.components ?? []).map((values, i) => ({
-      label: state.peaks[i].label,
-      values: sparseAligned(values),
-      color: darkPeakColors[state.peaks[i].id % darkPeakColors.length],
-    }));
-    const columns = [];
-    if (state.method !== 'none') columns.push({ label: 'Background', values: background });
-    columns.push({ label: 'Background-subtracted intensity', values: corrected });
-    if (result) {
-      columns.push({ label: 'Total fit', values: fit }, { label: 'Residual', values: residual });
-      components.forEach(({ label, values }, i) => {
-        const prefix = `Peak ${i + 1}`;
-        const name = englishExportLabel(label, prefix);
-        columns.push({ label: name === prefix ? prefix : `${prefix} - ${name}`, values });
-      });
-    }
-    columns.push({ label: `Original ${energyName().toLowerCase()} (eV)`, values: originalX });
-    const stem = englishExportFilename(state.spectrum.filename || state.spectrum.name);
-    const region = state.dataset.regions?.length > 1
-      ? `-${englishExportFilename(state.spectrum.name, `region-${Number(byId('region').value) + 1}`)}` : '';
-    const name = `${(stem + region).slice(0, 116)}-xps`;
-    const payload = plotLauncher ? toPlotLauncherProject({
+function exportPayload(project, plotLauncher, name) {
+  const { result, spectrum: { energyScale, y, yUnit }, method, peaks } = project;
+  const originalX = project.original.map((point) => point.x);
+  const x = project.points.map((point) => point.x);
+  const { values: baseline } = project.background;
+  const align = (values) => sparseAligned(values, null, project);
+  const corrected = align(project.section.map((point, i) => point.y - baseline[i]));
+  const background = method !== 'none' || result ? align(baseline) : undefined;
+  const fit = result ? align(result.fit) : undefined;
+  const residual = result ? align(result.residuals) : undefined;
+  const components = (result?.components ?? []).map((values, i) => ({
+    label: peaks[i].label,
+    values: align(values),
+    color: darkPeakColors[peaks[i].id % darkPeakColors.length],
+  }));
+  if (plotLauncher) {
+    return toPlotLauncherProject({
       name, x, y, yUnit, energyScale, corrected, originalX, background, fit, residual, components,
-    }) : spectrumToCsv({
-      x, y, yUnit, energyScale, columns,
-      analysis: {
-        version: 1, method: state.method, offset: state.offset, range: state.range,
-        peaks: state.peaks, status: result?.status ?? null, iterations: result?.iterations ?? 0,
-      },
     });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(new Blob([payload], { type: plotLauncher ? 'application/json' : 'text/csv;charset=utf-8' }));
-    link.href = url;
-    link.download = `${name}.${plotLauncher ? 'plotproject' : 'csv'}`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    toast(plotLauncher ? 'Plot Launcher XPS Fit project exported.' : 'Spectrum CSV exported.');
+  }
+
+  const columns = [];
+  if (method !== 'none') columns.push({ label: 'Background', values: background });
+  columns.push({ label: 'Background-subtracted intensity', values: corrected });
+  if (result) {
+    columns.push({ label: 'Total fit', values: fit }, { label: 'Residual', values: residual });
+    components.forEach(({ label, values }, i) => {
+      const prefix = `Peak ${i + 1}`;
+      const sanitized = englishExportLabel(label, prefix);
+      columns.push({ label: sanitized === prefix ? prefix : `${prefix} - ${sanitized}`, values });
+    });
+  }
+  const energy = energyScale === 'kinetic' ? 'kinetic' : 'binding';
+  columns.push({ label: `Original ${energy} energy (eV)`, values: originalX });
+  return spectrumToCsv({
+    x, y, yUnit, energyScale, columns,
+    analysis: {
+      version: 1, method, offset: project.offset, range: project.range,
+      peaks, status: result?.status ?? null, iterations: result?.iterations ?? 0,
+    },
+  });
+}
+
+function pickerUnavailable(error) {
+  return error?.name === 'SecurityError' || error?.name === 'NotSupportedError';
+}
+
+function downloadBlob(blob, filename) {
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function exportData(plotLauncher) {
+  if (!state.spectrum) return;
+  const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
+  const { dataset, spectrum, sourceHandle } = project;
+  const stem = englishExportFilename(spectrum.filename || spectrum.name);
+  const region = dataset.regions?.length > 1
+    ? `-${englishExportFilename(spectrum.name, `region-${Number(byId('region').value) + 1}`)}` : '';
+  const name = `${(stem + region).slice(0, 116)}-xps`;
+  const extension = plotLauncher ? '.plotproject' : '.csv';
+  const filename = name + extension;
+  const mime = plotLauncher ? 'application/json' : 'text/csv';
+  const description = plotLauncher ? 'Plot Launcher XPS Fit project' : 'Spectrum CSV';
+
+  try {
+    let destination;
+    if (sourceHandle && typeof window.showSaveFilePicker === 'function') {
+      try {
+        destination = await window.showSaveFilePicker({
+          startIn: sourceHandle,
+          suggestedName: filename,
+          types: [{ description, accept: { [mime]: [extension] } }],
+        });
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        if (!pickerUnavailable(error)) throw error;
+      }
+    }
+
+    const blob = new Blob([exportPayload(project, plotLauncher, name)], {
+      type: plotLauncher ? mime : mime + ';charset=utf-8',
+    });
+    if (destination) {
+      const writer = await destination.createWritable();
+      try {
+        await writer.write(blob);
+        await writer.close();
+      } catch (error) {
+        await writer.abort().catch(() => {});
+        throw error;
+      }
+    } else {
+      downloadBlob(blob, filename);
+    }
+    if (state.dataset === dataset) toast(`${description} exported.`);
   } catch (error) {
-    notice(error.message || 'Could not export the file.');
+    if (state.dataset === dataset) notice(error.message || 'Could not export the file.');
   }
 }
 
@@ -746,24 +808,37 @@ function setZoom(range) {
 
 const drawChart = createSpectrumChart(byId('spectrum'), byId('tooltip'), choosePeak, setZoom);
 
-async function open(file) {
-  if (!file) return;
+async function open(readSource, nativePicker = false) {
   const load = ++fileLoad;
   notice();
   try {
+    const { file, handle } = await readSource();
+    if (!file || load !== fileLoad) return;
     const spectrum = await readSpectrumFile(file);
-    if (load === fileLoad) loadDataset(spectrum);
+    if (load === fileLoad) loadDataset(spectrum, handle);
   } catch (error) {
-    if (load === fileLoad) notice(error.message || 'Could not open the file.');
+    if (load !== fileLoad || error?.name === 'AbortError') return;
+    if (nativePicker && pickerUnavailable(error)) byId('file').click();
+    else notice(error.message || 'Could not open the file.');
   }
 }
 
 byId('file').addEventListener('change', (event) => {
-  void open(event.target.files[0]);
+  const file = event.target.files[0];
+  if (file) void open(() => ({ file }));
   event.target.value = '';
 });
 for (const id of ['open-file', 'empty-open-file']) {
-  byId(id).addEventListener('click', () => byId('file').click());
+  byId(id).addEventListener('click', () => {
+    if (typeof window.showOpenFilePicker !== 'function' || typeof window.showSaveFilePicker !== 'function') {
+      byId('file').click();
+      return;
+    }
+    void open(async () => {
+      const [handle] = await window.showOpenFilePicker({ multiple: false, types: [spectrumFileType] });
+      return { file: await handle?.getFile(), handle };
+    }, true);
+  });
 }
 byId('new-project').addEventListener('click', resetProject);
 byId('demo').addEventListener('click', () => {
@@ -902,9 +977,19 @@ document.addEventListener('dragleave', (event) => {
 });
 document.addEventListener('drop', (event) => {
   byId('workspace').classList.remove('dragging');
-  if (!event.dataTransfer?.files.length) return;
+  const file = event.dataTransfer?.files[0];
+  if (!file) return;
   event.preventDefault();
-  void open(event.dataTransfer.files[0]);
+  const item = Array.from(event.dataTransfer.items ?? []).find(({ kind }) => kind === 'file');
+  void open(async () => {
+    let handle;
+    try {
+      handle = await item?.getAsFileSystemHandle?.();
+    } catch {
+      // Some browsers provide the dropped file without a local file handle.
+    }
+    return { file, handle: handle?.kind === 'file' ? handle : null };
+  });
 });
 
 installNumberInputs();
