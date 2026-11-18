@@ -24,6 +24,7 @@
           <button id="check-updates" class="button" type="button"><span data-icon="refresh"></span>Check for updates</button>
         </div>
         <div class="top-actions">
+          <button id="new-project" class="button" type="button" title="Start an empty project"><span data-icon="plus"></span>New project</button>
           <button id="demo" class="quiet" type="button">Demo</button>
           <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
           <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx" hidden>
@@ -36,18 +37,24 @@
           <p class="kicker">X-RAY PHOTOELECTRON SPECTROSCOPY</p>
           <h1>Spectrum analysis</h1>
         </div>
-        <div class="export-actions">
+        <div id="workspace-exports" class="export-actions" hidden>
           <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
           <button id="export-plot" class="button" type="button"><span data-icon="external"></span>Plot Launcher</button>
         </div>
       </div>
       <div id="global-error" class="notice error" role="alert" hidden></div>
-      <div class="layout">
+      <section id="empty-project" class="card project-empty" aria-labelledby="empty-title">
+        <div class="empty-project-icon" data-icon="activity" aria-hidden="true"></div>
+        <h2 id="empty-title">No spectrum loaded</h2>
+        <p class="muted">Open or drop a spectrum file to begin.</p>
+        <button id="empty-open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
+      </section>
+      <div id="analysis-workspace" class="layout" hidden>
         <section class="card chart-card" aria-labelledby="chart-title">
           <div class="panel-head chart-head">
             <div class="chart-file">
               <p class="kicker">SPECTRUM</p>
-              <h2 id="chart-title">C 1s</h2>
+              <h2 id="chart-title">Spectrum</h2>
               <p id="spectrum-meta" class="muted chart-meta"></p>
               <div id="region-wrap" class="region" hidden><label for="region">Region</label><select id="region"></select></div>
             </div>

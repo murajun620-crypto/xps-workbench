@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="xps-version" content="1.1.0">
-    <meta name="xps-build" content="830d7150f38a">
+    <meta name="xps-version" content="1.1.1">
+    <meta name="xps-build" content="af7028701d11">
     <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
@@ -67,6 +67,10 @@ h2 { font-size: 1.17rem; font-weight: 760; line-height: 1.35; letter-spacing: -.
 h3 { font-size: .965rem; font-weight: 740; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 345px); grid-template-rows: auto 1fr; gap: 16px; align-items: start; }
 .card { min-width: 0; background: #fff; border: 1px solid #e0e5ef; border-radius: 13px; box-shadow: 0 2px 7px #2b37540a; overflow: hidden; }
+.project-empty { min-height: clamp(260px, 42vh, 420px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; }
+.empty-project-icon { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 3px; border-radius: 11px; background: var(--soft); color: var(--accent-dark); }
+.empty-project-icon svg { width: 25px; height: 25px; }
+.project-empty .button { margin-top: 6px; }
 .panel-head { padding: 16px 19px; }
 .chart-head, .peaks-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .chart-head { min-height: 82px; }
@@ -155,7 +159,7 @@ td.number { color: #41506c; font-variant-numeric: tabular-nums; }
 .notice { border-radius: 7px; padding: 9px 12px; font-size: .88rem; margin-bottom: 12px; }
 .notice.error { background: #fdecec; color: #972b2b; }
 .toast { position: fixed; z-index: 3; bottom: 20px; right: 20px; background: #202848; color: #fff; padding: 10px 14px; border-radius: 9px; box-shadow: 0 6px 24px #20284848; max-width: calc(100% - 40px); font-size: .875rem; }
-.dragging .chart-card { outline: 2px dashed var(--accent); outline-offset: 3px; }
+.dragging :is(.chart-card, .project-empty) { outline: 2px dashed var(--accent); outline-offset: 3px; }
 dialog { padding: 20px; width: min(94vw, 535px); max-height: 85vh; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); box-shadow: 0 14px 60px #14213c3d; }
 dialog::backdrop { background: #111a32a0; }
 dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
@@ -183,8 +187,8 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
 }
 @media (max-width: 620px) {
   .topbar-inner { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding-block: 9px; }
-  .release-controls { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
-  .top-actions { grid-column: 2; grid-row: 1; }
+  .release-controls { grid-column: 2; grid-row: 1; }
+  .top-actions { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
 }
 @media (max-width: 420px) {
   .topbar-inner { gap: 5px; }
@@ -195,6 +199,12 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
   .panel-head { padding-inline: 12px; }
   .plot { margin-inline: 7px; }
   .legend { padding-left: 7px; gap: 1px 5px; }
+}
+@media (max-width: 370px) {
+  .topbar-inner { grid-template-columns: minmax(0, 1fr); }
+  .release-controls { grid-column: 1; grid-row: 2; }
+  .top-actions { grid-row: 3; }
+  .top-actions .button { padding-inline: 8px; }
 }
 </style>
     <style>
@@ -297,6 +307,7 @@ td .number-input {
           <button id="check-updates" class="button" type="button"><span data-icon="refresh"></span>Check for updates</button>
         </div>
         <div class="top-actions">
+          <button id="new-project" class="button" type="button" title="Start an empty project"><span data-icon="plus"></span>New project</button>
           <button id="demo" class="quiet" type="button">Demo</button>
           <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
           <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx" hidden>
@@ -309,18 +320,24 @@ td .number-input {
           <p class="kicker">X-RAY PHOTOELECTRON SPECTROSCOPY</p>
           <h1>Spectrum analysis</h1>
         </div>
-        <div class="export-actions">
+        <div id="workspace-exports" class="export-actions" hidden>
           <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
           <button id="export-plot" class="button" type="button"><span data-icon="external"></span>Plot Launcher</button>
         </div>
       </div>
       <div id="global-error" class="notice error" role="alert" hidden></div>
-      <div class="layout">
+      <section id="empty-project" class="card project-empty" aria-labelledby="empty-title">
+        <div class="empty-project-icon" data-icon="activity" aria-hidden="true"></div>
+        <h2 id="empty-title">No spectrum loaded</h2>
+        <p class="muted">Open or drop a spectrum file to begin.</p>
+        <button id="empty-open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
+      </section>
+      <div id="analysis-workspace" class="layout" hidden>
         <section class="card chart-card" aria-labelledby="chart-title">
           <div class="panel-head chart-head">
             <div class="chart-file">
               <p class="kicker">SPECTRUM</p>
-              <h2 id="chart-title">C 1s</h2>
+              <h2 id="chart-title">Spectrum</h2>
               <p id="spectrum-meta" class="muted chart-meta"></p>
               <div id="region-wrap" class="region" hidden><label for="region">Region</label><select id="region"></select></div>
             </div>
@@ -3120,12 +3137,13 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
     if (!scales || event.button !== 0) return;
     const position = point(event);
     if (position.x < scales.left || position.x > scales.right || position.y < scales.top || position.y > scales.bottom) return;
-    drag = position;
+    drag = { ...position, pointerId: event.pointerId };
     pointer = position;
     canvas.setPointerCapture(event.pointerId);
     schedule();
   });
   canvas.addEventListener("pointermove", (event) => {
+    if (!model) return;
     pointer = point(event);
     if (drag) pointer.x = Math.min(scales.right, Math.max(scales.left, pointer.x));
     schedule();
@@ -3153,6 +3171,19 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
   new ResizeObserver(schedule).observe(canvas);
   return (nextModel) => {
     model = nextModel;
+    if (!model) {
+      if (drag && canvas.hasPointerCapture(drag.pointerId)) canvas.releasePointerCapture(drag.pointerId);
+      scales = null;
+      pointer = null;
+      drag = null;
+      tooltip.hidden = true;
+      tooltip.textContent = "";
+      if (ctx) {
+        ctx.resetTransform();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
     schedule();
   };
 }
@@ -4668,28 +4699,30 @@ var fields = [
   ["mix", "Lorentzian fraction (%)", 0, 1]
 ];
 var maxPeaks = 12;
-var state = {
-  spectrum: null,
-  dataset: null,
-  points: [],
-  offset: 0,
-  range: [],
-  zoom: [],
-  method: "shirley",
-  view: "raw",
-  shiftMode: "direct",
-  pick: null,
-  peaks: [],
-  nextId: 0,
-  result: null,
-  preview: null,
-  background: null,
-  section: [],
-  start: 0,
-  disabledSeries: /* @__PURE__ */ new Set(),
-  revision: 0,
-  fitting: false
-};
+function emptyProject() {
+  return {
+    spectrum: null,
+    dataset: null,
+    points: [],
+    original: [],
+    offset: 0,
+    range: [],
+    zoom: [],
+    method: "shirley",
+    view: "raw",
+    shiftMode: "direct",
+    pick: null,
+    peaks: [],
+    nextId: 0,
+    result: null,
+    preview: null,
+    background: null,
+    section: [],
+    start: 0,
+    disabledSeries: /* @__PURE__ */ new Set()
+  };
+}
+var state = { ...emptyProject(), revision: 0, fitting: false };
 var fileLoad = 0;
 var statusTimeout;
 var fitWorker;
@@ -4816,6 +4849,45 @@ function invalidate() {
     workerObjectUrl = void 0;
   }
 }
+function showAnalysis(visible) {
+  byId("empty-project").hidden = visible;
+  byId("analysis-workspace").hidden = !visible;
+  byId("workspace-exports").hidden = !visible;
+}
+function resetProject() {
+  ++fileLoad;
+  invalidate();
+  Object.assign(state, emptyProject());
+  showAnalysis(false);
+  notice();
+  clearTimeout(statusTimeout);
+  byId("toast").hidden = true;
+  byId("toast").textContent = "";
+  byId("workspace").classList.remove("dragging");
+  byId("region-wrap").hidden = true;
+  byId("region").replaceChildren();
+  byId("legend").replaceChildren();
+  byId("peak-rows").replaceChildren();
+  byId("peak-count").textContent = "";
+  byId("chart-title").textContent = "Spectrum";
+  for (const id of ["spectrum-meta", "plot-coordinates", "background-info", "shift-info"]) {
+    byId(id).textContent = "";
+  }
+  for (const id of ["file", "offset", "observed", "target", "range-min", "range-max"]) {
+    const input = byId(id);
+    input.value = "";
+    input.removeAttribute("min");
+    input.removeAttribute("max");
+  }
+  byId("background").value = state.method;
+  const constraints = byId("peak-dialog");
+  if (constraints.open) constraints.close();
+  byId("constraint-rows").replaceChildren();
+  constraintPeakId = void 0;
+  renderPick();
+  renderFit();
+  drawChart(null);
+}
 function assignSpectrum(spectrum) {
   invalidate();
   notice();
@@ -4846,6 +4918,7 @@ function assignSpectrum(spectrum) {
     updatePreview();
   }
   syncControls();
+  showAnalysis(true);
   render();
 }
 function loadDataset(dataset) {
@@ -5362,7 +5435,10 @@ byId("file").addEventListener("change", (event) => {
   void open(event.target.files[0]);
   event.target.value = "";
 });
-byId("open-file").addEventListener("click", () => byId("file").click());
+for (const id of ["open-file", "empty-open-file"]) {
+  byId(id).addEventListener("click", () => byId("file").click());
+}
+byId("new-project").addEventListener("click", resetProject);
 byId("demo").addEventListener("click", () => {
   ++fileLoad;
   loadDataset(demoSpectrum());
@@ -5504,8 +5580,7 @@ document.addEventListener("drop", (event) => {
 });
 installNumberInputs();
 installUpdateCheck();
-loadDataset(demoSpectrum());
-runFit();
+resetProject();
 /*! Bundled license information:
 
 jszip/dist/jszip.min.js:

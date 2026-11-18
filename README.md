@@ -4,6 +4,8 @@ Calibrate energy, subtract backgrounds, and fit peaks directly in your browser.
 
 [Open XPS Workbench](https://murajun620-crypto.github.io/xps-workbench/)
 
+The workspace opens empty, including after a refresh. Select Open data to start from a spectrum, Demo for the sample, or New project to clear the current analysis.
+
 ## Use the app
 
 1. Open a CSV, TSV, TXT, Excel (.xlsx), or ISO 14976 VAMAS spectrum. The Region menu selects a measurement region or Excel sheet when several are available. Supported VAMAS data includes NORM XPS/ESCA with regular or irregular energies, including COMPRO .npl exports.

@@ -45,11 +45,14 @@ const fields = [
   ['mix', 'Lorentzian fraction (%)', 0, 1],
 ];
 const maxPeaks = 12;
-const state = {
-  spectrum: null, dataset: null, points: [], offset: 0, range: [], zoom: [], method: 'shirley',
-  view: 'raw', shiftMode: 'direct', pick: null, peaks: [], nextId: 0, result: null, preview: null,
-  background: null, section: [], start: 0, disabledSeries: new Set(), revision: 0, fitting: false,
-};
+function emptyProject() {
+  return {
+    spectrum: null, dataset: null, points: [], original: [], offset: 0, range: [], zoom: [], method: 'shirley',
+    view: 'raw', shiftMode: 'direct', pick: null, peaks: [], nextId: 0, result: null, preview: null,
+    background: null, section: [], start: 0, disabledSeries: new Set(),
+  };
+}
+const state = { ...emptyProject(), revision: 0, fitting: false };
 let fileLoad = 0;
 let statusTimeout;
 let fitWorker;
@@ -190,6 +193,47 @@ function invalidate() {
   }
 }
 
+function showAnalysis(visible) {
+  byId('empty-project').hidden = visible;
+  byId('analysis-workspace').hidden = !visible;
+  byId('workspace-exports').hidden = !visible;
+}
+
+function resetProject() {
+  ++fileLoad;
+  invalidate();
+  Object.assign(state, emptyProject());
+  showAnalysis(false);
+  notice();
+  clearTimeout(statusTimeout);
+  byId('toast').hidden = true;
+  byId('toast').textContent = '';
+  byId('workspace').classList.remove('dragging');
+  byId('region-wrap').hidden = true;
+  byId('region').replaceChildren();
+  byId('legend').replaceChildren();
+  byId('peak-rows').replaceChildren();
+  byId('peak-count').textContent = '';
+  byId('chart-title').textContent = 'Spectrum';
+  for (const id of ['spectrum-meta', 'plot-coordinates', 'background-info', 'shift-info']) {
+    byId(id).textContent = '';
+  }
+  for (const id of ['file', 'offset', 'observed', 'target', 'range-min', 'range-max']) {
+    const input = byId(id);
+    input.value = '';
+    input.removeAttribute('min');
+    input.removeAttribute('max');
+  }
+  byId('background').value = state.method;
+  const constraints = byId('peak-dialog');
+  if (constraints.open) constraints.close();
+  byId('constraint-rows').replaceChildren();
+  constraintPeakId = undefined;
+  renderPick();
+  renderFit();
+  drawChart(null);
+}
+
 function assignSpectrum(spectrum) {
   invalidate();
   notice();
@@ -219,6 +263,7 @@ function assignSpectrum(spectrum) {
     updatePreview();
   }
   syncControls();
+  showAnalysis(true);
   render();
 }
 
@@ -717,7 +762,10 @@ byId('file').addEventListener('change', (event) => {
   void open(event.target.files[0]);
   event.target.value = '';
 });
-byId('open-file').addEventListener('click', () => byId('file').click());
+for (const id of ['open-file', 'empty-open-file']) {
+  byId(id).addEventListener('click', () => byId('file').click());
+}
+byId('new-project').addEventListener('click', resetProject);
 byId('demo').addEventListener('click', () => {
   ++fileLoad;
   loadDataset(demoSpectrum());
@@ -861,5 +909,4 @@ document.addEventListener('drop', (event) => {
 
 installNumberInputs();
 installUpdateCheck();
-loadDataset(demoSpectrum());
-runFit();
+resetProject();

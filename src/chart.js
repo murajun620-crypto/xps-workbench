@@ -293,12 +293,13 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
     const position = point(event);
     if (position.x < scales.left || position.x > scales.right ||
       position.y < scales.top || position.y > scales.bottom) return;
-    drag = position;
+    drag = { ...position, pointerId: event.pointerId };
     pointer = position;
     canvas.setPointerCapture(event.pointerId);
     schedule();
   });
   canvas.addEventListener('pointermove', (event) => {
+    if (!model) return;
     pointer = point(event);
     if (drag) pointer.x = Math.min(scales.right, Math.max(scales.left, pointer.x));
     schedule();
@@ -326,6 +327,19 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
   new ResizeObserver(schedule).observe(canvas);
   return (nextModel) => {
     model = nextModel;
+    if (!model) {
+      if (drag && canvas.hasPointerCapture(drag.pointerId)) canvas.releasePointerCapture(drag.pointerId);
+      scales = null;
+      pointer = null;
+      drag = null;
+      tooltip.hidden = true;
+      tooltip.textContent = '';
+      if (ctx) {
+        ctx.resetTransform();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
     schedule();
   };
 }
