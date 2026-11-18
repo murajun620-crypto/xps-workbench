@@ -1,0 +1,85 @@
+.number-input {
+  --number-controls-width: 21px;
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.number-input > input[type="number"] {
+  display: block;
+  padding-inline-end: calc(var(--number-controls-width) + 4px);
+}
+
+.field-row > .number-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.number-field > .unit-input {
+  margin-top: 4px;
+}
+
+.unit-input > .number-input > input[type="number"] {
+  padding-inline-end: calc(var(--number-controls-width) + 25px);
+}
+
+.unit-input > .number-input + span {
+  inset-inline-end: 26px;
+}
+
+td .number-input {
+  min-width: 86px;
+}
+
+.number-input-controls {
+  position: absolute;
+  inset: 2px 2px 2px auto;
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+  width: calc(var(--number-controls-width) - 2px);
+  border-inline-start: 1px solid #e1e5ee;
+  border-radius: 0 5px 5px 0;
+  overflow: hidden;
+}
+
+.number-input-controls > button {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: #f7f8fc;
+  color: #52617d;
+  touch-action: manipulation;
+}
+
+.number-input-controls > button + button {
+  border-block-start: 1px solid #e1e5ee;
+}
+
+.number-input-controls > button:hover {
+  background: #eceef9;
+  color: var(--accent-dark, #4b3ab9);
+}
+
+.number-input-controls > button:active {
+  background: #dfe1f5;
+}
+
+.number-input-controls > button::before {
+  content: '';
+  border-inline: 4px solid transparent;
+}
+
+.number-input-increase::before {
+  border-block-end: 5px solid currentColor;
+}
+
+.number-input-decrease::before {
+  border-block-start: 5px solid currentColor;
+}
+
+.number-input > input:is(:disabled, [readonly]) + .number-input-controls {
+  opacity: .5;
+  pointer-events: none;
+}

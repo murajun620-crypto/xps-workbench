@@ -1,3 +1,5 @@
+import { ANALYSIS_METADATA_COLUMN, findCsvAnalysisColumns, readCsvAnalysis, serializeCsvAnalysis } from './csv-analysis.js';
+import { englishExportLabel } from './export-labels.js';
 import { xlsxWorksheets } from './xlsx.js';
 
 const VAMAS_SIGNATURE = /^VAMAS Surface Chemical Analysis Standard Data Transfer Format\b/i;
@@ -16,7 +18,7 @@ function asNumber(field, decimalComma = false) {
 }
 
 function filenameStem(filename) {
-  return filename.replace(/\.[^.]+$/, '') || '読み込んだスペクトル';
+  return filename.replace(/\.[^.]+$/, '') || 'Imported spectrum';
 }
 
 function axisScale(label) {
@@ -42,7 +44,7 @@ function energyFactor(label) {
 
 function makeSpectrum(pairs, metadata) {
   if (pairs.length < MIN_POINTS) {
-    throw new Error('エネルギーと強度の数値が3行以上必要です。');
+    throw new Error('At least three rows of numeric energy and intensity values are required.');
   }
 
   const scale = energyFactor(metadata.xUnit || '');
@@ -52,10 +54,10 @@ function makeSpectrum(pairs, metadata) {
   const y = [];
   for (const [energy, intensity] of pairs) {
     if (!Number.isFinite(energy) || !Number.isFinite(intensity)) {
-      throw new Error('スペクトルに読み取れない数値が含まれています。');
+      throw new Error('The spectrum contains an invalid number.');
     }
     if (x[x.length - 1] === energy) {
-      throw new Error('重複したエネルギー値があります。測定範囲ごとに分けて読み込んでください。');
+      throw new Error('The file contains duplicate energy values. Import each measurement region separately.');
     }
     x.push(energy);
     y.push(intensity);
@@ -99,6 +101,12 @@ function splitDelimited(line, separator) {
 }
 
 function namedColumns(fields) {
+  // Plot Launcher's XPS Fit layout keeps the corrected spectrum in columns A and B.
+  if (/^abscissa\b/i.test(fields[0]) && /^ordinate\b/i.test(fields[1])) {
+    const sourceAxis = fields[5];
+    const xLabel = /^original\s+(?:binding|kinetic)\s+energy\b/i.test(sourceAxis) ? sourceAxis : fields[0];
+    return { x: 0, y: 1, xLabel, yLabel: fields[1] };
+  }
   let x = -1;
   let y = -1;
   let xLabel;
@@ -153,6 +161,7 @@ function numericTables(rows, { decimalComma, spreadsheet = false }) {
     const header = fields.length > 1 ? namedColumns(fields) : null;
     if (header) {
       columns = header;
+      if (!spreadsheet) columns.analysis = findCsvAnalysisColumns(fields);
       active = null;
       continue;
     }
@@ -179,26 +188,30 @@ function numericTables(rows, { decimalComma, spreadsheet = false }) {
       continue;
     }
     if (!active) {
-      active = { pairs: [], columns, positions: { x: xIndex, y: yIndex } };
+      active = { pairs: [], columns, positions: { x: xIndex, y: yIndex }, decimalComma };
       tables.push(active);
     }
-    active.pairs.push([x, y]);
+    active.pairs.push(active.columns?.analysis ? [x, y, fields] : [x, y]);
   }
   return tables.filter(({ pairs }) => pairs.length >= MIN_POINTS);
 }
 
 function tableToSpectrum(table, filename, name = filenameStem(filename)) {
   if (table.invalidRow) {
-    throw new Error(`${table.invalidRow}行目のエネルギー値または強度が数値になっていません。`);
+    throw new Error(`Row ${table.invalidRow} has a non-numeric energy or intensity value.`);
   }
   const { xLabel = '', yLabel = '' } = table.columns ?? {};
-  return makeSpectrum(table.pairs, {
+  const spectrum = makeSpectrum(table.pairs, {
     name,
     filename,
     xUnit: xLabel,
     yUnit: intensityUnit(yLabel),
     energyScale: axisScale(xLabel) ?? 'binding',
   });
+  if (table.columns?.analysis) {
+    spectrum.analysis = readCsvAnalysis(table.columns.analysis, table.pairs, (value) => asNumber(value, table.decimalComma));
+  }
+  return spectrum;
 }
 
 function parseDelimited(text, filename) {
@@ -217,7 +230,7 @@ function parseDelimited(text, filename) {
     }
   }
   if (!best) {
-    throw new Error('CSV・TSV・テキストで、エネルギー列と強度列があるデータを選んでください。');
+    throw new Error('Choose a CSV, TSV, or text file with energy and intensity columns.');
   }
   return tableToSpectrum(best, filename);
 }
@@ -233,17 +246,17 @@ async function parseXlsx(bytes, filename) {
     try {
       regions.push(tableToSpectrum(table, filename, name));
     } catch (error) {
-      invalidSheet ??= new Error(`「${name}」シートの${error.message}`);
+      invalidSheet ??= new Error(`Sheet "${name}". ${error.message}`);
     }
   }
   if (regions.length) return { ...regions[0], regions };
-  throw invalidSheet ?? new Error('XLSXの各シートに、エネルギーと強度の数値を3行以上入れてください。');
+  throw invalidSheet ?? new Error('Choose an XLSX workbook with at least three rows of numeric energy and intensity values in a worksheet.');
 }
 
 function parseVamas(text, filename) {
   const lines = text.split(/\r\n|\n|\r/);
   let cursor = 1;
-  const invalid = () => new Error('VAMASのデータ形式を確認してください。');
+  const invalid = () => new Error('The VAMAS data format could not be read.');
   function next() {
     if (cursor >= lines.length) throw invalid();
     return lines[cursor++].trim();
@@ -268,14 +281,14 @@ function parseVamas(text, filename) {
   const experimentMode = next().toUpperCase();
   const scanMode = next().toUpperCase();
   if (experimentMode !== 'NORM' || !['REGULAR', 'IRREGULAR'].includes(scanMode)) {
-    throw new Error('VAMASはNORMモードのREGULAR・IRREGULARスキャンに対応しています。');
+    throw new Error('VAMAS import supports REGULAR and IRREGULAR scans in NORM mode.');
   }
   count(); // Number of spectral regions in the experiment.
   const experimentVariables = count();
   skip(experimentVariables * 2); // Labels and units.
   const blockOverrides = number();
   if (blockOverrides !== 0) {
-    throw new Error('ブロック項目を省略したVAMASは、エネルギー・強度の2列に書き出してください。');
+    throw new Error('For VAMAS files with omitted block fields, export the energy and intensity as two columns and import those.');
   }
   skip(count()); // Manually entered item identifiers.
   const futureExperimentFields = count();
@@ -289,7 +302,7 @@ function parseVamas(text, filename) {
     skip(count()); // Block comments.
     const technique = next().toUpperCase();
     if (!['XPS', 'ESCA'].includes(technique)) {
-      throw new Error('XPSスペクトルを含むVAMASファイルを選んでください。');
+      throw new Error('Choose a VAMAS file with XPS spectra.');
     }
     skip(experimentVariables);
     skip(1); // Source type.
@@ -313,7 +326,7 @@ function parseVamas(text, filename) {
     const energy = regular ? { label: xLabel, unit: xUnit } : variables[0];
     const signal = variables[regular ? 0 : 1];
     if (!/^(?:[mk]?ev)$/i.test(energy.unit)) {
-      throw new Error('VAMASのエネルギー単位を確認してください。');
+      throw new Error('VAMAS energy units must be eV, meV, or keV.');
     }
     if (regular && xStep === 0) throw invalid();
 
@@ -335,7 +348,7 @@ function parseVamas(text, filename) {
     }
     regions.push(
       makeSpectrum(pairs, {
-        name: blockName || [species, transition].filter(Boolean).join(' ') || `領域 ${block + 1}`,
+        name: blockName || [species, transition].filter(Boolean).join(' ') || `Region ${block + 1}`,
         filename,
         xUnit: energy.unit,
         yUnit: /^d$/i.test(signal.unit) ? intensityUnit(signal.label) : signal.unit,
@@ -351,18 +364,18 @@ function parseVamas(text, filename) {
 export function parseSpectrum(text, filename = '') {
   const source = text.replace(/^\uFEFF/, '');
   if (source.includes('\u0000')) {
-    throw new Error('テキスト形式で保存したエネルギーと強度のデータを選んでください。');
+    throw new Error('Choose a supported file with energy and intensity data.');
   }
   if (VAMAS_SIGNATURE.test(source.trimStart())) return parseVamas(source.trimStart(), filename);
   if (/\.(?:vms|npl)$/i.test(filename)) {
-    throw new Error('VAMASファイル（ISO 14976）のヘッダーを確認してください。');
+    throw new Error('The VAMAS (ISO 14976) file header is missing or invalid.');
   }
   return parseDelimited(source, filename);
 }
 
 export async function readSpectrumFile(file) {
   if (file.size > MAX_FILE_BYTES) {
-    throw new Error('24 MB以下のスペクトルファイルを選んでください。');
+    throw new Error('Choose a spectrum file of 24 MB or less.');
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (/\.xlsx$/i.test(file.name)) return parseXlsx(bytes, file.name);
@@ -383,13 +396,13 @@ export async function readSpectrumFile(file) {
   return parseSpectrum(source, file.name);
 }
 
-export const DEMO_SPECTRA = [{ id: 'c1s', label: 'C 1s — 合成データ' }];
+export const DEMO_SPECTRA = [{ id: 'c1s', label: 'C 1s - Synthetic spectrum' }];
 
 export function demoSpectrum() {
   const components = [
-    { label: 'C–C / C–H', center: 284.8, fwhm: 1.15, height: 16700, mix: 0.28 },
-    { label: 'C–O', center: 286.3, fwhm: 1.35, height: 5700, mix: 0.32 },
-    { label: 'O–C=O', center: 288.75, fwhm: 1.4, height: 2900, mix: 0.34 },
+    { label: 'C-C / C-H', center: 284.8, fwhm: 1.15, height: 16700, mix: 0.28 },
+    { label: 'C-O', center: 286.3, fwhm: 1.35, height: 5700, mix: 0.32 },
+    { label: 'O-C=O', center: 288.75, fwhm: 1.4, height: 2900, mix: 0.34 },
   ];
   const x = Array.from({ length: 241 }, (_, index) => (28200 + index * 5) / 100);
   const signal = x.map((energy) =>
@@ -441,23 +454,23 @@ export function spectrumToCsv({
   xUnit = 'eV',
   yUnit = '',
   energyScale = 'binding',
+  analysis,
 }) {
-  const energyLabel = energyScale === 'kinetic' ? '運動エネルギー' : '結合エネルギー';
+  const energyLabel = energyScale === 'kinetic' ? 'Kinetic Energy' : 'Binding Energy';
+  const signalUnit = englishExportLabel(yUnit, '');
   const labels = [
-    `${energyLabel} (${xUnit})`,
-    yUnit ? `測定強度 (${yUnit})` : '測定強度',
-    ...columns.map(({ label }) => label),
+    `${energyLabel} (${englishExportLabel(xUnit, 'eV')})`,
+    signalUnit ? `Measured Intensity (${signalUnit})` : 'Measured Intensity',
+    ...columns.map(({ label }, index) => englishExportLabel(label, `Column ${index + 3}`)),
   ];
+  const metadata = analysis && serializeCsvAnalysis(analysis);
+  if (metadata) labels.push(ANALYSIS_METADATA_COLUMN);
   const rows = [labels.map(csvLabel).join(',')];
   for (let row = 0; row < x.length; row += 1) {
     const index = energyScale === 'kinetic' ? row : x.length - 1 - row;
-    rows.push(
-      [
-        csvValue(x[index]),
-        csvValue(y[index]),
-        ...columns.map(({ values }) => csvValue(values[index])),
-      ].join(','),
-    );
+    const cells = [csvValue(x[index]), csvValue(y[index]), ...columns.map(({ values }) => csvValue(values[index]))];
+    if (metadata) cells.push(row === 0 ? csvLabel(metadata) : '');
+    rows.push(cells.join(','));
   }
   return `\uFEFF${rows.join('\r\n')}\r\n`;
 }

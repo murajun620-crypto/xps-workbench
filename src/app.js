@@ -1,6 +1,10 @@
 import { createSpectrumChart } from './chart.js';
 import { demoSpectrum, readSpectrumFile, spectrumToCsv } from './data.js';
+import { englishExportFilename, englishExportLabel } from './export-labels.js';
+import { installNumberInputs } from './number-input.js';
 import { PLOT_LAUNCHER_URL, toPlotLauncherProject } from './plot-launcher.js';
+import { restorePeakFromCurve } from './restore-peaks.js';
+import { installUpdateCheck } from './updates.js';
 import { analyzeBackground, estimatePeak, evaluateFit, fitPeaks, peakArea, shiftSpectrum } from './xps.js';
 
 const byId = (id) => document.getElementById(id);
@@ -18,6 +22,7 @@ const iconPaths = {
   trash: '<path d="M5 7h14M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   shield: '<path d="M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Zm-3-10 2 2 4-4"/>',
+  refresh: '<path d="M20 7v5h-5M4 17v-5h5m10.45 0a7.5 7.5 0 0 0-13.32-4.7m-1.58 4.7a7.5 7.5 0 0 0 13.32 4.7"/>',
 };
 
 function icon(name) {
@@ -29,15 +34,15 @@ for (const item of document.querySelectorAll('[data-icon]')) item.innerHTML = ic
 const peakColors = ['#b9a0ff', '#51daba', '#ffc47b', '#fa91c3', '#79caff', '#ff957f', '#d4ed80', '#a3a6ff'];
 const darkPeakColors = ['#704dd9', '#008666', '#b26413', '#be3c78', '#1979b4', '#b84225', '#5d7611', '#494dc8'];
 const shapeOptions = [
-  ['pseudo-voigt', '擬Voigt'],
+  ['pseudo-voigt', 'Pseudo-Voigt'],
   ['gaussian', 'Gaussian'],
   ['lorentzian', 'Lorentzian'],
 ];
 const fields = [
-  ['center', '位置 (eV)', -Infinity, Infinity],
+  ['center', 'Center (eV)', -Infinity, Infinity],
   ['fwhm', 'FWHM (eV)', 0.000001, Infinity],
-  ['height', '高さ', 0, Infinity],
-  ['mix', 'L比 (%)', 0, 1],
+  ['height', 'Height', 0, Infinity],
+  ['mix', 'Lorentzian fraction (%)', 0, 1],
 ];
 const maxPeaks = 12;
 const state = {
@@ -59,7 +64,7 @@ function decimal(value, digits = 3) {
 }
 
 function displayNumber(value, digits) {
-  return Number.isFinite(value) ? value.toLocaleString('ja-JP', { maximumFractionDigits: digits }) : '—';
+  return Number.isFinite(value) ? value.toLocaleString('en-US', { maximumFractionDigits: digits }) : '—';
 }
 
 function rangeOf(points) {
@@ -81,7 +86,7 @@ function toast(message) {
 }
 
 function energyName() {
-  return state.spectrum.energyScale === 'kinetic' ? '運動エネルギー' : '結合エネルギー';
+  return state.spectrum.energyScale === 'kinetic' ? 'Kinetic energy' : 'Binding energy';
 }
 
 function buildPeak(peak) {
@@ -103,6 +108,74 @@ function updatePreview() {
   state.preview = evaluateFit(state.section, state.background.values, state.peaks);
 }
 
+function savedSection(values) {
+  if (!values) return null;
+  const section = values.slice(state.start, state.start + state.section.length);
+  return section.length === state.section.length && section.every(Number.isFinite) ? section : null;
+}
+
+function savedRange(saved) {
+  const full = rangeOf(state.points);
+  const range = saved?.metadata?.range;
+  if (range && range[0] >= full[0] && range[1] <= full[1] &&
+    state.points.filter(({ x }) => x >= range[0] && x <= range[1]).length >= 3) {
+    return range;
+  }
+  for (const values of [saved?.fit, saved?.corrected, saved?.background]) {
+    if (!values) continue;
+    const first = values.findIndex(Number.isFinite);
+    const last = values.findLastIndex(Number.isFinite);
+    if (first >= 0 && last - first >= 2) return [state.points[first].x, state.points[last].x];
+  }
+  return full;
+}
+
+function restoreAnalysis(saved) {
+  const metadata = saved.metadata;
+  const baseline = savedSection(saved.background);
+  if (baseline) {
+    if (!metadata && state.method !== 'none') {
+      const linear = analyzeBackground(state.section, 'linear').values;
+      const error = (values) => values.reduce((sum, value, i) => sum + (value - baseline[i]) ** 2, 0);
+      if (error(linear) < error(state.background.values)) state.method = 'linear';
+    }
+    state.background = { values: baseline, status: 'ok', iterations: 0 };
+  }
+  const curves = saved.components.slice(0, maxPeaks).map(({ values }) => savedSection(values));
+  if (metadata) {
+    state.peaks = metadata.peaks.slice(0, maxPeaks).map((peak) => {
+      const bounds = Object.fromEntries(Object.entries(peak.bounds || {}).map(([key, [low, high]]) =>
+        [key, [low ?? -Infinity, high ?? Infinity]]));
+      return { ...peak, bounds };
+    });
+    state.nextId = Math.max(0, ...state.peaks.map(({ id }) => id + 1));
+  } else {
+    state.peaks = curves.flatMap((curve, i) => {
+      if (!curve) return [];
+      const label = saved.components[i].label;
+      return [buildPeak({ ...restorePeakFromCurve(state.section, curve), label })];
+    });
+  }
+  updatePreview();
+  const fit = savedSection(saved.fit);
+  if (!fit || !state.peaks.length) return;
+  const residuals = savedSection(saved.residual) || fit.map((value, i) => state.section[i].y - value);
+  const count = residuals.length;
+  const mean = state.section.reduce((sum, { y }) => sum + y / count, 0);
+  const total = state.section.reduce((sum, { y }) => sum + (y - mean) ** 2, 0);
+  const error = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const status = metadata?.status || 'restored';
+  state.result = {
+    peaks: state.peaks, fit, residuals, rSquared: total > 0 ? 1 - error / total : null,
+    rmse: Math.sqrt(error / count), iterations: metadata?.iterations ?? 0, status,
+    converged: status === 'converged' || status === 'fixed',
+    components: metadata
+      ? state.peaks.map((_, i) => curves[i] || state.preview.components[i])
+      : curves.filter(Boolean),
+  };
+  state.preview = state.result;
+}
+
 function invalidate() {
   state.revision++;
   state.result = null;
@@ -121,10 +194,14 @@ function assignSpectrum(spectrum) {
   invalidate();
   notice();
   state.spectrum = spectrum;
-  state.original = spectrum.x.map((x, index) => ({ x, y: spectrum.y[index] }));
-  state.points = state.original;
-  state.offset = 0;
-  state.range = spectrum.range || rangeOf(state.points);
+  state.points = spectrum.x.map((x, index) => ({ x, y: spectrum.y[index] }));
+  const saved = spectrum.analysis;
+  state.offset = saved?.metadata?.offset ?? (saved?.originalX ? spectrum.x[0] - saved.originalX[0] : 0);
+  state.original = !saved?.originalX && !state.offset ? state.points : state.points.map(({ x, y }, i) => ({
+    x: saved?.originalX?.[i] ?? x - state.offset, y,
+  }));
+  state.range = spectrum.range || savedRange(saved);
+  if (saved) state.method = saved.metadata?.method || (saved.background ? 'shirley' : 'none');
   state.zoom = rangeOf(state.points);
   state.pick = null;
   state.view = 'raw';
@@ -136,7 +213,8 @@ function assignSpectrum(spectrum) {
   byId('observed').value = '';
   byId('target').value = '';
   recalculate();
-  if (!state.peaks.length) {
+  if (saved) restoreAnalysis(saved);
+  if (!state.peaks.length && !saved?.metadata) {
     state.peaks = [buildPeak(estimatePeak(state.section, state.background.values))];
     updatePreview();
   }
@@ -157,9 +235,14 @@ function syncControls() {
   byId('offset').value = state.offset;
   byId('range-min').value = state.range[0];
   byId('range-max').value = state.range[1];
+  const [minimum, maximum] = rangeOf(state.points);
+  for (const id of ['range-min', 'range-max']) {
+    byId(id).min = minimum;
+    byId(id).max = maximum;
+  }
   byId('background').value = state.method;
   const shift = state.offset > 0 ? '+' : state.offset < 0 ? '−' : '';
-  byId('shift-info').textContent = `適用中　${shift}${Math.abs(state.offset).toFixed(3)} eV`;
+  byId('shift-info').textContent = `Applied: ${shift}${Math.abs(state.offset).toFixed(3)} eV`;
 }
 
 function applyShift(offset) {
@@ -175,7 +258,7 @@ function applyShift(offset) {
     shifted = shiftSpectrum(state.original, offset);
     if (shifted.some(({ x }, i) => i && x <= shifted[i - 1].x)) throw new RangeError();
   } catch {
-    notice('有効なエネルギー刻みを保てるシフト量を入力してください。');
+    notice('Enter an offset that preserves distinct energy values.');
     return;
   }
   const move = (value) => value - previous + offset;
@@ -185,7 +268,7 @@ function applyShift(offset) {
   });
   const [low, high] = moveRange(state.range);
   if (shifted.filter(({ x }) => x >= low && x <= high).length < 3) {
-    notice('このシフト量では解析範囲内のデータ点を保持できません。');
+    notice('This offset leaves too few points in the analysis range.');
     return;
   }
   invalidate();
@@ -212,13 +295,13 @@ function setRange(min, max) {
   const full = rangeOf(state.points);
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min ||
     min < full[0] - 1e-8 || max > full[1] + 1e-8) {
-    notice(`測定範囲（${decimal(full[0], 6)}–${decimal(full[1], 6)} eV）内で、下限より大きい上限を指定してください。`);
+    notice(`Enter an increasing range within ${decimal(full[0], 6)} to ${decimal(full[1], 6)} eV.`);
     return;
   }
   min = Math.max(min, full[0]);
   max = Math.min(max, full[1]);
   if (state.points.filter(({ x }) => x >= min && x <= max).length < 3) {
-    notice('解析範囲に少なくとも3点の測定データを含めてください。');
+    notice('Include at least three measured points in the analysis range.');
     return;
   }
   invalidate();
@@ -247,15 +330,15 @@ function renderChart() {
   function add(id, label, color, values, options = {}) {
     series.push({ id, label, color, values, visible: !state.disabledSeries.has(id), ...options });
   }
-  add('measured', corrected ? '背景減算後' : '測定データ', '#f2f4ff',
+  add('measured', corrected ? 'Background-subtracted' : 'Measured', '#f2f4ff',
     corrected ? sparseAligned(state.section.map(({ y }, i) => y - background[i])) : measurement,
     { primary: true, marker: true, order: 4 });
   if (state.peaks.length) {
-    add('total', state.result ? '合成フィット' : '初期モデル', '#a995ff',
+    add('total', state.result ? 'Total fit' : 'Initial model', '#a995ff',
       sparseAligned(fit.map((y, i) => corrected ? y - background[i] : y)), { width: 2.4, order: 3 });
   }
   if (!corrected && state.method !== 'none') {
-    add('background', '背景', '#9eaac7', sparseAligned(background), { dash: true, order: 2 });
+    add('background', 'Background', '#9eaac7', sparseAligned(background), { dash: true, order: 2 });
   }
   const alignedBaseline = components.length ? sparseAligned(baseline) : null;
   components.forEach((values, index) => {
@@ -266,7 +349,7 @@ function renderChart() {
   });
   const residualExists = !!state.result && state.peaks.length > 0;
   if (residualExists) {
-    add('residual', '残差', '#9cb3ff', [], { residualOnly: true });
+    add('residual', 'Residual', '#9cb3ff', [], { residualOnly: true });
   }
   const legend = byId('legend');
   const focusedId = legend.contains(document.activeElement) ? document.activeElement.dataset.series : null;
@@ -289,14 +372,14 @@ function renderChart() {
     residual: residualExists && !state.disabledSeries.has('residual') ? sparseAligned(residuals) : null,
     reverse: state.spectrum.energyScale !== 'kinetic',
     xLabel: `${energyName()} (eV)`,
-    yLabel: state.spectrum.yUnit ? `強度 (${state.spectrum.yUnit})` : '強度',
+    yLabel: state.spectrum.yUnit ? `Intensity (${state.spectrum.yUnit})` : 'Intensity',
   });
 }
 
 function render() {
   const name = state.spectrum.name;
   byId('chart-title').textContent = name;
-  byId('spectrum-meta').textContent = `${state.spectrum.filename || name}  ·  ${state.points.length.toLocaleString('ja-JP')} 点  ·  ${energyName()}`;
+  byId('spectrum-meta').textContent = `${state.spectrum.filename || name}  ·  ${state.points.length.toLocaleString('en-US')} points  ·  ${energyName()}`;
   for (const button of document.querySelectorAll('[data-view]')) {
     button.setAttribute('aria-pressed', button.dataset.view === state.view);
   }
@@ -317,29 +400,30 @@ function renderPick() {
   byId('pick-reference').setAttribute('aria-pressed', state.pick === 'reference');
   byId('pick-reference').classList.toggle('active', state.pick === 'reference');
   byId('plot-help').textContent = {
-    peak: 'ピークの位置をクリック · Escでキャンセル',
-    reference: '参照に使う測定位置をクリック · Escでキャンセル',
-  }[state.pick] || 'ドラッグで拡大 · クリックで座標を確認';
+    peak: 'Click the peak center · Press Esc to cancel',
+    reference: 'Click the measured reference peak · Press Esc to cancel',
+  }[state.pick] || 'Drag to zoom · Click to inspect energy';
 }
 
 function renderBackground() {
   const info = byId('background-info');
   const warning = state.background.status !== 'ok';
-  const messages = { 'no-peak': 'Shirleyの積分量が不足したためLinearを表示しています。', 'iteration-limit': 'Shirleyが収束しなかったためLinearを表示しています。' };
+  const messages = { 'no-peak': 'Linear fallback: Shirley requires a positive peak area.', 'iteration-limit': 'Linear fallback: Shirley did not converge.' };
   info.classList.toggle('warning', warning);
-  info.textContent = warning ? messages[state.background.status] : `解析に使用　${state.section.length.toLocaleString('ja-JP')} 点`;
+  info.textContent = warning ? messages[state.background.status] : `Analysis points: ${state.section.length.toLocaleString('en-US')}`;
 }
 
 function renderFit() {
   const status = byId('fit-status');
   const result = state.result;
   const labels = {
-    converged: '収束', fixed: '固定値で評価', 'stalled': '最適化が停滞',
-    'iteration-limit': '反復上限に到達', 'insufficient-points': '自由変数に対し測定点が不足',
+    converged: 'Converged', fixed: 'Evaluated with fixed parameters', 'stalled': 'Optimization stalled',
+    'iteration-limit': 'Iteration limit reached', 'insufficient-points': 'Too few points for the free parameters',
+    restored: 'Restored fit',
   };
   status.classList.toggle('success', !!result?.converged);
-  status.classList.toggle('warning', !!result && !result.converged);
-  status.textContent = state.fitting ? '計算中…' : result ? labels[result.status] : 'フィット前';
+  status.classList.toggle('warning', !!result && !result.converged && result.status !== 'restored');
+  status.textContent = state.fitting ? 'Fitting…' : result ? labels[result.status] : 'Fit not run';
   byId('r-squared').value = Number.isFinite(result?.rSquared) ? result.rSquared.toFixed(5) : '—';
   byId('rmse').value = displayNumber(result?.rmse, 3);
   const button = byId('fit');
@@ -357,6 +441,10 @@ function rowInput(peak, key, label, digits) {
   } else {
     input.step = 'any';
     input.value = decimal(peak[key], digits);
+    const [, , min, max] = fields.find(([field]) => field === key);
+    const [lower, upper] = peak.bounds?.[key] ?? [min, max];
+    if (Number.isFinite(lower)) input.min = lower;
+    if (Number.isFinite(upper)) input.max = upper;
   }
   return input;
 }
@@ -369,7 +457,7 @@ function renderPeaks() {
     const cell = body.insertRow().insertCell();
     cell.colSpan = 7;
     cell.className = 'peak-empty';
-    cell.textContent = '「ピークを追加」を押し、グラフで成分の位置を選択してください。';
+    cell.textContent = 'Select Add peak, then click the component center in the plot.';
     return;
   }
   for (const peak of state.peaks) {
@@ -380,24 +468,24 @@ function renderPeaks() {
     const swatch = document.createElement('span');
     swatch.className = 'swatch';
     swatch.style.setProperty('--swatch', darkPeakColors[peak.id % darkPeakColors.length]);
-    name.append(swatch, rowInput(peak, 'label', '名前'));
+    name.append(swatch, rowInput(peak, 'label', 'name'));
     row.insertCell().append(name);
     const select = document.createElement('select');
     select.dataset.field = 'shape';
-    select.setAttribute('aria-label', `${peak.label} 形状`);
+    select.setAttribute('aria-label', `${peak.label} shape`);
     select.replaceChildren(...shapeOptions.map(([value, label]) => new Option(label, value)));
     select.value = peak.shape;
     row.insertCell().append(select);
-    for (const [key, label, digits] of [['center', '位置', 5], ['fwhm', 'FWHM', 5], ['height', '高さ', 4]]) {
+    for (const [key, label, digits] of [['center', 'Center', 5], ['fwhm', 'FWHM', 5], ['height', 'Height', 4]]) {
       row.insertCell().append(rowInput(peak, key, label, digits));
     }
     const area = row.insertCell();
     area.className = 'number';
     area.textContent = displayNumber(peakArea(peak), 2);
-    area.title = '成分の全域積分';
+    area.title = 'Integral of the full component profile';
     const actions = document.createElement('div');
     actions.className = 'row-actions';
-    for (const [action, glyph, label] of [['constraint', 'sliders', '調整'], ['delete', 'trash', '削除']]) {
+    for (const [action, glyph, label] of [['constraint', 'sliders', 'Constraints'], ['delete', 'trash', 'Delete']]) {
       const button = document.createElement('button');
       button.className = 'icon-button';
       if (action === 'constraint' && (Object.values(peak.fixed || {}).some(Boolean) || Object.keys(peak.bounds || {}).length)) {
@@ -418,10 +506,10 @@ function openConstraints(peak) {
   constraintPeakId = peak.id;
   const rows = byId('constraint-rows');
   rows.replaceChildren();
-  byId('peak-dialog-title').textContent = `${peak.label} の制約`;
+  byId('peak-dialog-title').textContent = `Constraints for ${peak.label}`;
   const grid = document.createElement('div');
   grid.className = 'constraint-grid';
-  for (const value of ['変数', '値', '固定', '下限', '上限']) {
+  for (const value of ['Parameter', 'Value', 'Fixed', 'Lower', 'Upper']) {
     const heading = document.createElement('span');
     heading.textContent = value;
     grid.append(heading);
@@ -434,8 +522,8 @@ function openConstraints(peak) {
     title.textContent = label;
     grid.append(title);
     for (const [column, value, aria] of [
-      ['value', peak[key], '値'], ['fixed', peak.fixed?.[key], '固定'],
-      ['min', peak.bounds?.[key]?.[0], '下限'], ['max', peak.bounds?.[key]?.[1], '上限'],
+      ['value', peak[key], 'Value'], ['fixed', peak.fixed?.[key], 'Fixed'],
+      ['min', peak.bounds?.[key]?.[0], 'Lower'], ['max', peak.bounds?.[key]?.[1], 'Upper'],
     ]) {
       const input = document.createElement('input');
       input.id = `constraint-${key}-${column}`;
@@ -475,7 +563,7 @@ function applyConstraints(event) {
     const high = upper.value === '' ? max : upper.valueAsNumber / factor;
     next[key] = value.valueAsNumber / factor;
     if (low > high || next[key] < low || next[key] > high) {
-      value.setCustomValidity('下限・上限と値の関係を確認してください。');
+      value.setCustomValidity('Enter a value between the lower and upper bounds.');
       value.reportValidity();
       return;
     }
@@ -502,7 +590,7 @@ function runFit() {
     if (revision !== state.revision) return;
     invalidate();
     if (error) {
-      notice('フィットを完了できませんでした。位置・FWHM・高さと制約を確認してください。');
+      notice('Fit failed. Check the initial centers, FWHMs, heights, and constraints.');
     } else {
       state.result = result;
       state.peaks = result.peaks;
@@ -532,51 +620,55 @@ function runFit() {
 function exportData(plotLauncher) {
   try {
     const result = state.result;
-    const { values: background } = state.background;
+    const { energyScale, y, yUnit } = state.spectrum;
+    const originalX = state.original.map((point) => point.x);
+    const x = state.points.map((point) => point.x);
+    const { values: baseline } = state.background;
+    const corrected = sparseAligned(state.section.map((point, i) => point.y - baseline[i]));
+    const background = state.method !== 'none' || result ? sparseAligned(baseline) : undefined;
+    const fit = result ? sparseAligned(result.fit) : undefined;
+    const residual = result ? sparseAligned(result.residuals) : undefined;
+    const components = (result?.components ?? []).map((values, i) => ({
+      label: state.peaks[i].label,
+      values: sparseAligned(values),
+      color: darkPeakColors[state.peaks[i].id % darkPeakColors.length],
+    }));
     const columns = [];
-    const series = [{ label: '測定データ', column: 1, color: '#253853', mode: 'scatter' }];
-    function add(label, values, options) {
-      columns.push({ label, values });
-      if (options) series.push({ label, column: columns.length + 1, ...options });
-    }
-    if (state.method !== 'none') {
-      add('バックグラウンド', sparseAligned(background), { color: '#6f7890', style: '--' });
-    }
-    add('背景減算後', sparseAligned(state.section.map(({ y }, i) => y - background[i])));
+    if (state.method !== 'none') columns.push({ label: 'Background', values: background });
+    columns.push({ label: 'Background-subtracted intensity', values: corrected });
     if (result) {
-      add('合成フィット', sparseAligned(result.fit), { color: '#5441d0' });
-      add('残差', sparseAligned(result.residuals));
-      result.components.forEach((component, i) => {
-        const peak = state.peaks[i];
-        add(`成分 ${i + 1} ${peak.label}`, sparseAligned(component));
-        if (plotLauncher) {
-          add(`背景付き成分 ${i + 1} ${peak.label}`, sparseAligned(component, background), {
-            color: darkPeakColors[peak.id % darkPeakColors.length],
-          });
-        }
+      columns.push({ label: 'Total fit', values: fit }, { label: 'Residual', values: residual });
+      components.forEach(({ label, values }, i) => {
+        const prefix = `Peak ${i + 1}`;
+        const name = englishExportLabel(label, prefix);
+        columns.push({ label: name === prefix ? prefix : `${prefix} - ${name}`, values });
       });
     }
-    add('補正前エネルギー (eV)', state.spectrum.x);
-    const csv = spectrumToCsv({ ...state.spectrum, x: state.points.map(({ x }) => x), columns });
-    const stem = (state.spectrum.filename || state.spectrum.name).replace(/\.[^.]+$/, '');
-    const region = state.dataset.regions?.length > 1 ? `-${state.spectrum.name}` : '';
-    const name = (stem + region).replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
-    if (plotLauncher && state.points.length > 200000) throw new Error('Plot Launcherは20万点まで読み込めます。CSVで保存してください。');
+    columns.push({ label: `Original ${energyName().toLowerCase()} (eV)`, values: originalX });
+    const stem = englishExportFilename(state.spectrum.filename || state.spectrum.name);
+    const region = state.dataset.regions?.length > 1
+      ? `-${englishExportFilename(state.spectrum.name, `region-${Number(byId('region').value) + 1}`)}` : '';
+    const name = `${(stem + region).slice(0, 116)}-xps`;
     const payload = plotLauncher ? toPlotLauncherProject({
-      name: `${name}-xps`, csv, xLabel: energyName(), yUnit: state.spectrum.yUnit, series,
-      reverseX: state.spectrum.energyScale !== 'kinetic',
-    }) : csv;
+      name, x, y, yUnit, energyScale, corrected, originalX, background, fit, residual, components,
+    }) : spectrumToCsv({
+      x, y, yUnit, energyScale, columns,
+      analysis: {
+        version: 1, method: state.method, offset: state.offset, range: state.range,
+        peaks: state.peaks, status: result?.status ?? null, iterations: result?.iterations ?? 0,
+      },
+    });
     const link = document.createElement('a');
     const url = URL.createObjectURL(new Blob([payload], { type: plotLauncher ? 'application/json' : 'text/csv;charset=utf-8' }));
     link.href = url;
-    link.download = `${name}-xps.${plotLauncher ? 'plotproject' : 'csv'}`;
+    link.download = `${name}.${plotLauncher ? 'plotproject' : 'csv'}`;
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-    toast(plotLauncher ? 'Plot Launcherの編集用ファイルを保存しました。' : '解析データをCSVで保存しました。');
+    toast(plotLauncher ? 'Plot Launcher XPS Fit project exported.' : 'Spectrum CSV exported.');
   } catch (error) {
-    notice(error.message || 'ファイルの書き出しに失敗しました。');
+    notice(error.message || 'Could not export the file.');
   }
 }
 
@@ -589,7 +681,7 @@ function choosePeak(x) {
     renderPick();
   } else if (state.pick === 'peak') {
     if (x < state.range[0] || x > state.range[1]) {
-      toast('解析範囲内の位置を選択してください。');
+      toast('Pick a position within the analysis range.');
       return;
     }
     invalidate();
@@ -617,7 +709,7 @@ async function open(file) {
     const spectrum = await readSpectrumFile(file);
     if (load === fileLoad) loadDataset(spectrum);
   } catch (error) {
-    if (load === fileLoad) notice(error.message || 'ファイルを開けませんでした。');
+    if (load === fileLoad) notice(error.message || 'Could not open the file.');
   }
 }
 
@@ -673,7 +765,7 @@ byId('full-range').addEventListener('click', () => setRange(...rangeOf(state.poi
 byId('fit').addEventListener('click', runFit);
 byId('add-peak').addEventListener('click', () => {
   if (state.peaks.length >= maxPeaks) {
-    toast(`ピーク成分は最大${maxPeaks}個です。`);
+    toast(`Add up to ${maxPeaks} peak components.`);
     return;
   }
   state.pick = state.pick === 'peak' ? null : 'peak';
@@ -703,7 +795,7 @@ byId('peak-rows').addEventListener('change', (event) => {
   if (limits && (!Number.isFinite(value) || value < limits[0] || value > limits[1] ||
     (peak.bounds?.[key] && (value < peak.bounds[key][0] || value > peak.bounds[key][1])))) {
     input.value = decimal(peak[key], 8);
-    toast('数値が有効範囲または設定済みの制約を外れています。');
+    toast('Enter a value within the allowed range and constraints.');
     return;
   }
   peak[key] = value;
@@ -741,7 +833,7 @@ const launcherLink = document.createElement('a');
 launcherLink.href = PLOT_LAUNCHER_URL;
 launcherLink.target = '_blank';
 launcherLink.rel = 'noopener noreferrer';
-launcherLink.textContent = 'Plot Launcherを開く';
+launcherLink.textContent = 'Open Plot Launcher';
 byId('help-dialog').querySelector('ol li:last-child').append(' ', launcherLink);
 for (const button of document.querySelectorAll('[data-close]')) {
   button.addEventListener('click', () => byId(button.dataset.close).close());
@@ -767,5 +859,7 @@ document.addEventListener('drop', (event) => {
   void open(event.dataTransfer.files[0]);
 });
 
+installNumberInputs();
+installUpdateCheck();
 loadDataset(demoSpectrum());
 runFit();

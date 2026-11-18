@@ -32,9 +32,11 @@ h1, h2, h3, p { margin: 0; }
 .brand strong { font-weight: 620; }
 .brand-mark { display: grid; place-items: center; border-radius: 10px; width: 36px; height: 36px; color: white; background: #191b35; }
 .brand-mark svg { width: 27px; }
-.top-actions, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
+.top-actions, .release-controls, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
+.release-controls { margin-inline-start: auto; }
+.app-version { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .button, .quiet, .text-button, .icon-button { border-radius: 8px; font-size: .875rem; font-weight: 630; }
-.button, .icon-button { background: #fff; border: 1px solid #dce2ee; color: #283651; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px; padding: 0 11px; white-space: nowrap; }
+.button, .icon-button { background: #fff; border: 1px solid #dce2ee; color: #283651; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px; padding: 0 11px; white-space: nowrap; text-decoration: none; }
 .button:hover, .icon-button:hover { background: #f5f6fd; border-color: #c8cde1; }
 .button[aria-pressed="true"] { color: var(--accent-dark); background: var(--soft); border-color: #c8baff; }
 .button.solid { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 2px 4px #3221a725; }
@@ -127,7 +129,7 @@ tr:last-child td { border-bottom: 0; }
 td:first-child, th:first-child { padding-left: 15px; }
 td:last-child, th:last-child { padding-right: 15px; }
 td input:not([type="checkbox"]), td select { min-height: 32px; min-width: 57px; }
-td select { min-width: 104px; }
+td select { min-width: 120px; }
 td.number { color: #41506c; font-variant-numeric: tabular-nums; }
 .name-field, .row-actions { display: flex; align-items: center; gap: 5px; }
 .name-field input { min-width: 65px !important; }
@@ -150,8 +152,8 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
 .constraint-grid { display: grid; grid-template-columns: minmax(60px, 1fr) repeat(4, minmax(43px, .85fr)); gap: 5px; align-items: center; margin-top: 8px; }
 .constraint-grid label, .constraint-grid span { font-size: .82rem; }
 .constraint-grid input[type="checkbox"] { justify-self: start; accent-color: var(--accent); width: 18px; height: 18px; }
-.help-list, .reference-list { padding-left: 1.25rem; }
-.help-list li + li, .reference-list li + li { margin-top: 5px; }
+.help-list { padding-left: 1.25rem; }
+.help-list li + li { margin-top: 5px; }
 
 @media (max-width: 1050px) {
   .topbar-inner, .shell { width: calc(100% - 32px); }
@@ -166,6 +168,11 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
   .page-heading { align-items: start; flex-wrap: wrap; margin-bottom: 13px; }
   .chart-head { flex-wrap: wrap; }
   canvas { height: 345px; }
+}
+@media (max-width: 620px) {
+  .topbar-inner { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding-block: 9px; }
+  .release-controls { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+  .top-actions { grid-column: 2; grid-row: 1; }
 }
 @media (max-width: 420px) {
   .topbar-inner { gap: 5px; }

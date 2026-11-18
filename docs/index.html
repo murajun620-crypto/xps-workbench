@@ -1,11 +1,14 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="description" content="XPSスペクトルのエネルギー補正、背景減算、ピークフィットをブラウザで。">
+    <meta name="xps-version" content="1.1.0">
+    <meta name="xps-build" content="830d7150f38a">
+    <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
     <style>
 :root {
   color-scheme: light;
@@ -41,9 +44,11 @@ h1, h2, h3, p { margin: 0; }
 .brand strong { font-weight: 620; }
 .brand-mark { display: grid; place-items: center; border-radius: 10px; width: 36px; height: 36px; color: white; background: #191b35; }
 .brand-mark svg { width: 27px; }
-.top-actions, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
+.top-actions, .release-controls, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
+.release-controls { margin-inline-start: auto; }
+.app-version { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .button, .quiet, .text-button, .icon-button { border-radius: 8px; font-size: .875rem; font-weight: 630; }
-.button, .icon-button { background: #fff; border: 1px solid #dce2ee; color: #283651; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px; padding: 0 11px; white-space: nowrap; }
+.button, .icon-button { background: #fff; border: 1px solid #dce2ee; color: #283651; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px; padding: 0 11px; white-space: nowrap; text-decoration: none; }
 .button:hover, .icon-button:hover { background: #f5f6fd; border-color: #c8cde1; }
 .button[aria-pressed="true"] { color: var(--accent-dark); background: var(--soft); border-color: #c8baff; }
 .button.solid { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 2px 4px #3221a725; }
@@ -136,7 +141,7 @@ tr:last-child td { border-bottom: 0; }
 td:first-child, th:first-child { padding-left: 15px; }
 td:last-child, th:last-child { padding-right: 15px; }
 td input:not([type="checkbox"]), td select { min-height: 32px; min-width: 57px; }
-td select { min-width: 104px; }
+td select { min-width: 120px; }
 td.number { color: #41506c; font-variant-numeric: tabular-nums; }
 .name-field, .row-actions { display: flex; align-items: center; gap: 5px; }
 .name-field input { min-width: 65px !important; }
@@ -159,8 +164,8 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
 .constraint-grid { display: grid; grid-template-columns: minmax(60px, 1fr) repeat(4, minmax(43px, .85fr)); gap: 5px; align-items: center; margin-top: 8px; }
 .constraint-grid label, .constraint-grid span { font-size: .82rem; }
 .constraint-grid input[type="checkbox"] { justify-self: start; accent-color: var(--accent); width: 18px; height: 18px; }
-.help-list, .reference-list { padding-left: 1.25rem; }
-.help-list li + li, .reference-list li + li { margin-top: 5px; }
+.help-list { padding-left: 1.25rem; }
+.help-list li + li { margin-top: 5px; }
 
 @media (max-width: 1050px) {
   .topbar-inner, .shell { width: calc(100% - 32px); }
@@ -176,6 +181,11 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
   .chart-head { flex-wrap: wrap; }
   canvas { height: 345px; }
 }
+@media (max-width: 620px) {
+  .topbar-inner { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding-block: 9px; }
+  .release-controls { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+  .top-actions { grid-column: 2; grid-row: 1; }
+}
 @media (max-width: 420px) {
   .topbar-inner { gap: 5px; }
   .top-actions { gap: 2px; }
@@ -187,6 +197,93 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
   .legend { padding-left: 7px; gap: 1px 5px; }
 }
 </style>
+    <style>
+.number-input {
+  --number-controls-width: 21px;
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.number-input > input[type="number"] {
+  display: block;
+  padding-inline-end: calc(var(--number-controls-width) + 4px);
+}
+
+.field-row > .number-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.number-field > .unit-input {
+  margin-top: 4px;
+}
+
+.unit-input > .number-input > input[type="number"] {
+  padding-inline-end: calc(var(--number-controls-width) + 25px);
+}
+
+.unit-input > .number-input + span {
+  inset-inline-end: 26px;
+}
+
+td .number-input {
+  min-width: 86px;
+}
+
+.number-input-controls {
+  position: absolute;
+  inset: 2px 2px 2px auto;
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+  width: calc(var(--number-controls-width) - 2px);
+  border-inline-start: 1px solid #e1e5ee;
+  border-radius: 0 5px 5px 0;
+  overflow: hidden;
+}
+
+.number-input-controls > button {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: #f7f8fc;
+  color: #52617d;
+  touch-action: manipulation;
+}
+
+.number-input-controls > button + button {
+  border-block-start: 1px solid #e1e5ee;
+}
+
+.number-input-controls > button:hover {
+  background: #eceef9;
+  color: var(--accent-dark, #4b3ab9);
+}
+
+.number-input-controls > button:active {
+  background: #dfe1f5;
+}
+
+.number-input-controls > button::before {
+  content: '';
+  border-inline: 4px solid transparent;
+}
+
+.number-input-increase::before {
+  border-block-end: 5px solid currentColor;
+}
+
+.number-input-decrease::before {
+  border-block-start: 5px solid currentColor;
+}
+
+.number-input > input:is(:disabled, [readonly]) + .number-input-controls {
+  opacity: .5;
+  pointer-events: none;
+}
+</style>
   </head>
   <body>
     <header class="topbar">
@@ -195,9 +292,13 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
           <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 19h4.2c1.4 0 2.4-.9 2.8-2.2l2.1-8.3a1.05 1.05 0 0 1 2.04 0l2.05 8.3c.35 1.3 1.42 2.2 2.75 2.2H24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 22h20" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" opacity=".55"/></svg></span>
           <span>XPS <strong>Workbench</strong></span>
         </div>
+        <div class="release-controls">
+          <span id="current-version" class="app-version" aria-label="App version"></span>
+          <button id="check-updates" class="button" type="button"><span data-icon="refresh"></span>Check for updates</button>
+        </div>
         <div class="top-actions">
-          <button id="demo" class="quiet" type="button">サンプル</button>
-          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>データを開く</button>
+          <button id="demo" class="quiet" type="button">Demo</button>
+          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
           <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx" hidden>
         </div>
       </div>
@@ -206,7 +307,7 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
       <div class="page-heading">
         <div>
           <p class="kicker">X-RAY PHOTOELECTRON SPECTROSCOPY</p>
-          <h1>スペクトル解析</h1>
+          <h1>Spectrum analysis</h1>
         </div>
         <div class="export-actions">
           <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
@@ -221,124 +322,126 @@ dialog p, dialog li { font-size: .875rem; line-height: 1.55; }
               <p class="kicker">SPECTRUM</p>
               <h2 id="chart-title">C 1s</h2>
               <p id="spectrum-meta" class="muted chart-meta"></p>
-              <div id="region-wrap" class="region" hidden><label for="region">測定領域</label><select id="region"></select></div>
+              <div id="region-wrap" class="region" hidden><label for="region">Region</label><select id="region"></select></div>
             </div>
             <div class="chart-actions">
-              <div class="segmented" aria-label="スペクトル表示">
-                <button type="button" data-view="raw" aria-pressed="true">測定</button>
-                <button type="button" data-view="corrected" aria-pressed="false">背景減算後</button>
+              <div class="segmented" aria-label="Spectrum display">
+                <button type="button" data-view="raw" aria-pressed="true">Measured</button>
+                <button type="button" data-view="corrected" aria-pressed="false">Background-subtracted</button>
               </div>
-              <button id="reset-zoom" class="icon-button" type="button" title="表示範囲をリセット" aria-label="表示範囲をリセット"><span data-icon="expand"></span></button>
+              <button id="reset-zoom" class="icon-button" type="button" title="Reset zoom" aria-label="Reset zoom"><span data-icon="expand"></span></button>
             </div>
           </div>
           <div id="plot" class="plot">
-            <div id="legend" class="legend" role="group" aria-label="系列の表示"></div>
+            <div id="legend" class="legend" role="group" aria-label="Plot series"></div>
             <div class="canvas-frame">
-              <canvas id="spectrum" aria-label="測定スペクトルとフィット曲線"></canvas>
+              <canvas id="spectrum" aria-label="Measured spectrum and fit curves"></canvas>
               <div id="tooltip" class="tooltip" hidden></div>
             </div>
           </div>
-          <div class="plot-footer"><span id="plot-help">ドラッグで拡大 · グラフをクリックしてピークを選択</span><span id="plot-coordinates"></span></div>
+          <div class="plot-footer"><span id="plot-help">Drag to zoom · Click to inspect energy</span><span id="plot-coordinates"></span></div>
         </section>
 
         <aside class="card analysis-card" aria-labelledby="analysis-title">
           <div class="panel-head settings-head">
             <p class="kicker">ANALYSIS</p>
-            <h2 id="analysis-title">解析設定</h2>
+            <h2 id="analysis-title">Analysis settings</h2>
           </div>
           <div class="settings-section">
-            <div class="section-heading"><span class="section-icon" data-icon="shift"></span><h3>エネルギーシフト</h3></div>
-            <div class="segmented stretch" aria-label="シフト方式">
-              <button type="button" data-shift-mode="direct" aria-pressed="true">直接入力</button>
-              <button type="button" data-shift-mode="reference" aria-pressed="false">参照ピーク</button>
+            <div class="section-heading"><span class="section-icon" data-icon="shift"></span><h3>Energy shift</h3></div>
+            <div class="segmented stretch" aria-label="Shift mode">
+              <button type="button" data-shift-mode="direct" aria-pressed="true">Direct offset</button>
+              <button type="button" data-shift-mode="reference" aria-pressed="false">Reference peak</button>
             </div>
             <form id="direct-form" class="field-row">
-              <label for="offset">シフト量<div class="unit-input"><input type="number" id="offset" step="any" value="0" required><span>eV</span></div></label>
-              <button type="submit" class="button field-button">適用</button>
+              <div class="number-field"><label for="offset">Offset</label><div class="unit-input"><input type="number" id="offset" step="any" data-increment="0.01" value="0" required><span>eV</span></div></div>
+              <button type="submit" class="button field-button">Apply</button>
             </form>
             <form id="reference-form" hidden>
               <div class="field-row">
-                <label for="observed">測定位置<div class="unit-input"><input type="number" id="observed" step="any" required><span>eV</span></div></label>
-                <label for="target">参照値<div class="unit-input"><input type="number" id="target" step="any" required><span>eV</span></div></label>
+                <div class="number-field"><label for="observed">Measured energy</label><div class="unit-input"><input type="number" id="observed" step="any" data-increment="0.01" required><span>eV</span></div></div>
+                <div class="number-field"><label for="target">Reference energy</label><div class="unit-input"><input type="number" id="target" step="any" data-increment="0.01" required><span>eV</span></div></div>
               </div>
               <div class="field-row reference-actions">
-                <button id="pick-reference" type="button" class="button secondary">グラフから選択</button>
-                <button type="submit" class="button field-button">適用</button>
+                <button id="pick-reference" type="button" class="button secondary">Pick from plot</button>
+                <button type="submit" class="button field-button">Apply</button>
               </div>
             </form>
-            <p class="muted section-note" id="shift-info">適用中　0.000 eV</p>
+            <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
           </div>
           <div class="settings-section">
-            <div class="section-heading"><span class="section-icon" data-icon="layers"></span><h3>バックグラウンド</h3></div>
-            <label for="background">減算方式</label>
+            <div class="section-heading"><span class="section-icon" data-icon="layers"></span><h3>Background</h3></div>
+            <label for="background">Method</label>
             <select id="background">
-              <option value="shirley">Shirley（反復）</option>
-              <option value="linear">Linear（直線）</option>
-              <option value="none">なし</option>
+              <option value="shirley">Shirley (iterative)</option>
+              <option value="linear">Linear</option>
+              <option value="none">None</option>
             </select>
             <form id="range-form">
-              <div class="range-title"><span>解析範囲</span><button class="text-button" id="full-range" type="button">全範囲</button></div>
+              <div class="range-title"><span>Analysis range</span><button class="text-button" id="full-range" type="button">Full range</button></div>
               <div class="field-row range-fields">
-                <label class="sr-only" for="range-min">下限 (eV)</label>
-                <div class="unit-input"><input id="range-min" type="number" step="any" required><span>eV</span></div>
+                <label class="sr-only" for="range-min">Lower limit (eV)</label>
+                <div class="unit-input"><input id="range-min" type="number" step="any" data-increment="0.01" required><span>eV</span></div>
                 <span class="range-separator">–</span>
-                <label class="sr-only" for="range-max">上限 (eV)</label>
-                <div class="unit-input"><input id="range-max" type="number" step="any" required><span>eV</span></div>
-                <button class="button field-button" type="submit">適用</button>
+                <label class="sr-only" for="range-max">Upper limit (eV)</label>
+                <div class="unit-input"><input id="range-max" type="number" step="any" data-increment="0.01" required><span>eV</span></div>
+                <button class="button field-button" type="submit">Apply</button>
               </div>
             </form>
             <p id="background-info" class="muted section-note"></p>
           </div>
           <div class="settings-section fit-section">
-            <div class="section-heading"><span class="section-icon" data-icon="activity"></span><h3>ピークフィット</h3></div>
+            <div class="section-heading"><span class="section-icon" data-icon="activity"></span><h3>Peak fitting</h3></div>
             <div id="fit-status" class="fit-status" role="status"></div>
             <div class="metrics">
               <div><span>R²</span><output id="r-squared">—</output></div>
               <div><span>RMSE</span><output id="rmse">—</output></div>
             </div>
-            <button id="fit" type="button" class="button solid fit-button"><span data-icon="spark"></span>フィットを実行</button>
+            <button id="fit" type="button" class="button solid fit-button"><span data-icon="spark"></span>Run fit</button>
           </div>
         </aside>
 
         <section class="card peaks-card" aria-labelledby="peaks-title">
           <div class="panel-head peaks-head">
-            <div><h2 id="peaks-title">ピーク成分 <span id="peak-count" class="counter"></span></h2><p class="muted">名前と初期値を編集できます。</p></div>
-            <button id="add-peak" class="button" type="button" aria-pressed="false"><span data-icon="plus"></span>ピークを追加</button>
+            <div><h2 id="peaks-title">Peak components <span id="peak-count" class="counter"></span></h2><p class="muted">Edit component names and initial parameters.</p></div>
+            <button id="add-peak" class="button" type="button" aria-pressed="false"><span data-icon="plus"></span>Add peak</button>
           </div>
-          <div class="table-scroll" role="region" aria-label="ピーク成分の表" tabindex="0">
+          <div class="table-scroll" role="region" aria-label="Peak component table" tabindex="0">
             <table>
-              <thead><tr><th scope="col">成分</th><th scope="col">形状</th><th scope="col">位置 <small>eV</small></th><th scope="col">FWHM <small>eV</small></th><th scope="col">高さ</th><th scope="col">面積</th><th scope="col"><span class="sr-only">編集</span></th></tr></thead>
+              <thead><tr><th scope="col">Component</th><th scope="col">Shape</th><th scope="col">Center <small>eV</small></th><th scope="col">FWHM <small>eV</small></th><th scope="col">Height</th><th scope="col">Area</th><th scope="col"><span class="sr-only">Edit</span></th></tr></thead>
               <tbody id="peak-rows"></tbody>
             </table>
           </div>
         </section>
       </div>
-      <footer class="footer"><span><span data-icon="shield"></span>解析データはブラウザ内で処理されます</span><button id="show-help" class="text-button" type="button">使い方・参考資料</button></footer>
+      <footer class="footer"><span><span data-icon="shield"></span>Data is processed in your browser</span><button id="show-help" class="text-button" type="button">Help</button></footer>
     </main>
     <dialog id="peak-dialog" aria-labelledby="peak-dialog-title">
       <form id="peak-form">
-        <div class="dialog-head"><h2 id="peak-dialog-title">ピークの制約</h2><button type="button" data-close="peak-dialog" class="icon-button" aria-label="閉じる"><span data-icon="close"></span></button></div>
-        <p class="muted">値の固定、または自由変数の上下限を設定できます。</p>
+        <div class="dialog-head"><h2 id="peak-dialog-title">Peak constraints</h2><button type="button" data-close="peak-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
+        <p class="muted">Fix a parameter or set bounds for the fit.</p>
         <div id="constraint-rows"></div>
-        <div class="dialog-actions"><button type="button" class="button" data-close="peak-dialog">キャンセル</button><button type="submit" class="button solid">適用</button></div>
+        <div class="dialog-actions"><button type="button" class="button" data-close="peak-dialog">Cancel</button><button type="submit" class="button solid">Apply</button></div>
       </form>
     </dialog>
     <dialog id="help-dialog" aria-labelledby="help-title">
-      <div class="dialog-head"><h2 id="help-title">使い方・参考資料</h2><button type="button" data-close="help-dialog" class="icon-button" aria-label="閉じる"><span data-icon="close"></span></button></div>
+      <div class="dialog-head"><h2 id="help-title">Help</h2><button type="button" data-close="help-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
       <ol class="help-list">
-        <li>CSV・TSV・TXT・Excel（.xlsx）のエネルギー／強度データ、またはVAMASのXPSデータを開きます。Excelに複数の測定シートがある場合は「測定領域」で切り替えます。</li>
-        <li>シフト量を入力するか、補正前の測定位置と参照値を入力します。</li>
-        <li>背景方式と解析範囲を指定します。ShirleyとLinearでは解析範囲の両端の測定強度を背景の端点に使います。</li>
-        <li>ピークを追加し、位置・幅・高さを設定してフィットを実行します。調整ボタンから固定値、上下限、擬VoigtのL比を編集できます。</li>
-        <li>残差と成分を確認し、CSVまたはPlot Launcherの編集用プロジェクトを保存します。</li>
+        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS spectrum. Use Region to choose a measurement or Excel sheet.</li>
+        <li>Enter an energy offset, or enter the measured and reference energies of a known peak.</li>
+        <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
+        <li>Add peaks, set their initial centers, widths, and heights, then select Run fit. Use Constraints to fix values, set limits, or adjust the pseudo-Voigt Lorentzian fraction.</li>
+        <li>Inspect the residuals and components. Export a CSV to reopen the analysis, or export a Plot Launcher XPS Fit project.</li>
       </ol>
-      <p>擬Voigtは同じFWHMのGaussianとLorentzianの高さの加重和です。面積は各成分の全域積分、残差は測定値−合成曲線です。</p>
-      <ul class="reference-list">
-        <li><a href="https://casaxps.com/pdfs/CasaXPSCookbook2026.pdf" target="_blank" rel="noopener noreferrer">CasaXPS Cookbook</a></li>
-        <li><a href="https://www.kolibrik.net/en/solutions-products/kolxpd/manuals/fitting-independent-parameters" target="_blank" rel="noopener noreferrer">KolXPD フィットチュートリアル</a></li>
-        <li><a href="https://khervetools.com/docs/" target="_blank" rel="noopener noreferrer">KherveFitting マニュアル</a></li>
-        <li><a href="https://www.sasj.jp/JSA/CONTENTS/vol.24_1/Vol.24%20No.1/Vol.24%20No.1_02_Yoshihara.pdf" target="_blank" rel="noopener noreferrer">COMPRO12の使用法（1）</a></li>
-      </ul>
+      <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>
+    </dialog>
+    <dialog id="update-dialog" aria-labelledby="update-title">
+      <div class="dialog-head"><h2 id="update-title">App updates</h2><button type="button" data-close="update-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
+      <p id="update-status" role="status"></p>
+      <div class="dialog-actions">
+        <button type="button" class="button" data-close="update-dialog">Close</button>
+        <a id="open-update" class="button solid" target="_blank" rel="noopener noreferrer" hidden>Open latest version</a>
+      </div>
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
     <script type="module">
@@ -2970,7 +3073,7 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
       ctx.font = sans;
       ctx.textAlign = "right";
       ctx.fillStyle = palette.tick;
-      ctx.fillText("\u6B8B\u5DEE", left - 7, residualY(0));
+      ctx.fillText("Residual", left - 7, residualY(0));
       ctx.font = mono;
       const limit = axisTicks(0, residualMax, 2).at(-1);
       if (limit > 0) {
@@ -3054,6 +3157,137 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
   };
 }
 
+// xps-source:src/export-labels.js
+function asciiText(value) {
+  return String(value ?? "").normalize("NFKD").replace(new RegExp("\\p{M}", "gu"), "").replace(/[\u2010-\u2015\u2212]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\x20-\x7e]+/g, " ").replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, " ").replace(/\s+/g, " ").trim();
+}
+function englishExportLabel(value, fallback = "Series") {
+  const label = asciiText(value);
+  return /[a-z0-9]/i.test(label) ? label : asciiText(fallback);
+}
+function englishExportFilename(value, fallback = "spectrum") {
+  const stem = String(value ?? "").replace(/\.(csv|tsv|txt|dat|xy|xlsx|vms|vamas|npl|plotproject)$/i, "");
+  const label = englishExportLabel(stem, fallback);
+  const filename = label.replace(/[^a-z0-9._-]+/gi, "-").slice(0, 120).replace(/^[.-]+|[.-]+$/g, "");
+  if (!filename) return "spectrum";
+  return /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(filename) ? `xps-${filename}` : filename;
+}
+
+// xps-source:src/csv-analysis.js
+var ANALYSIS_METADATA_COLUMN = "XPS Workbench Metadata";
+var METADATA_VERSION = 1;
+var MAX_METADATA_CHARS = 32e3;
+var MAX_PEAKS = 12;
+var methods = /* @__PURE__ */ new Set(["none", "linear", "shirley"]);
+var shapes = /* @__PURE__ */ new Set(["gaussian", "lorentzian", "pseudo-voigt"]);
+var statuses = /* @__PURE__ */ new Set(["converged", "fixed", "stalled", "iteration-limit", "insufficient-points", "restored"]);
+var parameters = ["center", "fwhm", "height", "mix"];
+function peakMetadata(peak, index, sanitizeLabel) {
+  if (!peak || !shapes.has(peak.shape) || !parameters.every((key) => Number.isFinite(peak[key])) || peak.fwhm <= 0 || peak.height < 0 || peak.mix < 0 || peak.mix > 1) return null;
+  const fixed = {};
+  const bounds = {};
+  for (const key of parameters) {
+    if (peak.fixed?.[key] === true) fixed[key] = true;
+    const limits = peak.bounds?.[key];
+    if (limits === void 0) continue;
+    if (!Array.isArray(limits) || limits.length !== 2) return null;
+    const [min, max] = limits;
+    const lower = min === -Infinity ? null : min;
+    const upper = max === Infinity ? null : max;
+    if (lower !== null && !Number.isFinite(lower) || upper !== null && !Number.isFinite(upper) || lower !== null && upper !== null && lower > upper) return null;
+    if (lower !== null || upper !== null) bounds[key] = [lower, upper];
+  }
+  const fallback = `Peak ${index + 1}`;
+  const text = typeof peak.label === "string" ? peak.label.slice(0, 200) : fallback;
+  return {
+    id: Number.isSafeInteger(peak.id) && peak.id >= 0 && peak.id <= Number.MAX_SAFE_INTEGER - MAX_PEAKS ? peak.id : index,
+    label: sanitizeLabel ? englishExportLabel(text, fallback) : text.trim() || fallback,
+    shape: peak.shape,
+    center: peak.center,
+    fwhm: peak.fwhm,
+    height: peak.height,
+    mix: peak.mix,
+    ...Object.keys(fixed).length ? { fixed } : {},
+    ...Object.keys(bounds).length ? { bounds } : {}
+  };
+}
+function validatedMetadata(value, sanitizeLabel = false) {
+  if (!value || value.version !== METADATA_VERSION || !methods.has(value.method) || !Number.isFinite(value.offset) || !Array.isArray(value.range) || value.range.length !== 2 || !value.range.every(Number.isFinite) || value.range[0] >= value.range[1] || !Array.isArray(value.peaks) || value.peaks.length > MAX_PEAKS) return null;
+  const peaks = Array.from(value.peaks, (peak, index) => peakMetadata(peak, index, sanitizeLabel));
+  if (peaks.includes(null)) return null;
+  if (new Set(peaks.map(({ id }) => id)).size !== peaks.length) {
+    peaks.forEach((peak, index) => {
+      peak.id = index;
+    });
+  }
+  return {
+    version: METADATA_VERSION,
+    method: value.method,
+    offset: value.offset,
+    range: value.range.slice(),
+    peaks,
+    status: statuses.has(value.status) ? value.status : null,
+    iterations: Number.isSafeInteger(value.iterations) && value.iterations >= 0 ? value.iterations : null
+  };
+}
+function serializeCsvAnalysis(analysis) {
+  const normalized = validatedMetadata(analysis, true);
+  return normalized ? JSON.stringify(normalized) : "";
+}
+function findCsvAnalysisColumns(fields2) {
+  const names = fields2.map((value) => value.normalize("NFKC").replace(/\s+/g, " ").trim());
+  const first = (pattern) => names.findIndex((name) => pattern.test(name));
+  const metadata = first(/^xps workbench metadata$/i);
+  const originalX = first(/^(?:original (?:binding |kinetic )?energy|補正前エネルギー)(?:\s*\(eV\))?$/i);
+  const background = first(/^(?:background|バックグラウンド)$/i);
+  const fit = first(/^(?:total fit|合成フィット)$/i);
+  const residual = first(/^(?:residual|残差)$/i);
+  const corrected = first(/^(?:background[- ]subtracted intensity|背景減算後)$/i);
+  const components = [];
+  names.forEach((name, column) => {
+    const match = /^(?:Peak|成分)\s*(\d+)(?:\s+-\s+|\s+|$)(.*)$/i.exec(name);
+    const number = Number(match?.[1]);
+    if (number >= 1 && number <= MAX_PEAKS && !components.some((component) => component.number === number)) {
+      components.push({ column, number, label: match[2] || `Peak ${number}` });
+    }
+  });
+  components.sort((a, b) => a.number - b.number);
+  if (metadata < 0 && (originalX < 0 || background < 0 && fit < 0 && corrected < 0 && components.length === 0)) {
+    return null;
+  }
+  return { metadata, originalX, background, fit, residual, corrected, components };
+}
+function readCsvAnalysis(columns, pairs, asNumber2) {
+  function values(column) {
+    if (column < 0) return null;
+    return pairs.map(([, , row]) => {
+      const value = asNumber2(row[column]);
+      return Number.isFinite(value) ? value : null;
+    });
+  }
+  let metadata = null;
+  if (columns.metadata >= 0) {
+    const row = pairs.find(([, , fields2]) => fields2[columns.metadata]);
+    const cell = row?.[2][columns.metadata];
+    if (cell && cell.length <= MAX_METADATA_CHARS) {
+      try {
+        metadata = validatedMetadata(JSON.parse(cell));
+      } catch {
+      }
+    }
+  }
+  const originalX = values(columns.originalX);
+  return {
+    metadata,
+    originalX: originalX?.every((value, i) => Number.isFinite(value) && (i === 0 || value > originalX[i - 1])) ? originalX : null,
+    background: values(columns.background),
+    fit: values(columns.fit),
+    residual: values(columns.residual),
+    corrected: values(columns.corrected),
+    components: columns.components.map(({ column, label }) => ({ label, values: values(column) }))
+  };
+}
+
 // xps-source:src/xlsx.js
 var import_jszip = __toESM(require_jszip_min());
 var MAX_XML_BYTES = 32 * 1024 * 1024;
@@ -3065,7 +3299,7 @@ var OFFICE_REL_NAMESPACES = [
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
   "http://purl.oclc.org/ooxml/officeDocument/relationships"
 ];
-var invalidWorkbook = () => new Error("XLSX\u5F62\u5F0F\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u7834\u640D\u3057\u305F\u30D5\u30A1\u30A4\u30EB\u3084\u30D1\u30B9\u30EF\u30FC\u30C9\u4ED8\u304D\u306E\u30D5\u30A1\u30A4\u30EB\u306F\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3002");
+var invalidWorkbook = () => new Error("The XLSX workbook could not be read. Check that it is valid and unencrypted.");
 function child(element, name) {
   if (!element) return void 0;
   for (const item of element.children) {
@@ -3083,7 +3317,7 @@ function readXmlBytes(entry, limit) {
       if (size > limit) {
         chunks.length = 0;
         stream.pause();
-        reject(new Error("XLSX\u306E\u5C55\u958B\u5F8C\u306E\u30B5\u30A4\u30BA\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002\u6E2C\u5B9A\u30B7\u30FC\u30C8\u3092\u5225\u306E\u30D5\u30A1\u30A4\u30EB\u306B\u5206\u3051\u3066\u304F\u3060\u3055\u3044\u3002"));
+        reject(new Error("The XLSX workbook is too large when unpacked. Split the measurement sheets into separate files."));
         return;
       }
       chunks.push(chunk);
@@ -3182,7 +3416,7 @@ function* worksheetRows(root, sharedStrings) {
     if (row.localName !== "row") continue;
     rowCount++;
     if (rowCount > MAX_ROWS) {
-      throw new Error("XLSX\u306E1\u30B7\u30FC\u30C8\u306B\u8AAD\u307F\u8FBC\u3081\u308B\u884C\u6570\u306F20\u4E07\u884C\u307E\u3067\u3067\u3059\u3002");
+      throw new Error("XLSX import supports up to 200,000 rows per worksheet.");
     }
     rowNumber = Number(row.getAttribute("r")) || rowNumber + 1;
     const fields2 = [];
@@ -3220,7 +3454,7 @@ async function* xlsxWorksheets(bytes) {
     const worksheet = links.find((link) => link.id === id && link.type === "worksheet");
     if (!worksheet) continue;
     const rows = worksheetRows(await read(worksheet.path, "worksheet"), sharedStrings);
-    yield { name: sheet.getAttribute("name") || "\u30B7\u30FC\u30C8", rows };
+    yield { name: sheet.getAttribute("name") || "Worksheet", rows };
   }
 }
 
@@ -3239,7 +3473,7 @@ function asNumber(field, decimalComma = false) {
   return NUMBER.test(value) ? Number(value.replace(/[dD]/, "e")) : NaN;
 }
 function filenameStem(filename) {
-  return filename.replace(/\.[^.]+$/, "") || "\u8AAD\u307F\u8FBC\u3093\u3060\u30B9\u30DA\u30AF\u30C8\u30EB";
+  return filename.replace(/\.[^.]+$/, "") || "Imported spectrum";
 }
 function axisScale(label) {
   if (/kinetic|運動|\bk\.?\s*e\.?\b/i.test(label)) return "kinetic";
@@ -3261,7 +3495,7 @@ function energyFactor(label) {
 }
 function makeSpectrum(pairs, metadata) {
   if (pairs.length < MIN_POINTS) {
-    throw new Error("\u30A8\u30CD\u30EB\u30AE\u30FC\u3068\u5F37\u5EA6\u306E\u6570\u5024\u304C3\u884C\u4EE5\u4E0A\u5FC5\u8981\u3067\u3059\u3002");
+    throw new Error("At least three rows of numeric energy and intensity values are required.");
   }
   const scale = energyFactor(metadata.xUnit || "");
   for (const point of pairs) point[0] *= scale;
@@ -3270,10 +3504,10 @@ function makeSpectrum(pairs, metadata) {
   const y = [];
   for (const [energy, intensity] of pairs) {
     if (!Number.isFinite(energy) || !Number.isFinite(intensity)) {
-      throw new Error("\u30B9\u30DA\u30AF\u30C8\u30EB\u306B\u8AAD\u307F\u53D6\u308C\u306A\u3044\u6570\u5024\u304C\u542B\u307E\u308C\u3066\u3044\u307E\u3059\u3002");
+      throw new Error("The spectrum contains an invalid number.");
     }
     if (x[x.length - 1] === energy) {
-      throw new Error("\u91CD\u8907\u3057\u305F\u30A8\u30CD\u30EB\u30AE\u30FC\u5024\u304C\u3042\u308A\u307E\u3059\u3002\u6E2C\u5B9A\u7BC4\u56F2\u3054\u3068\u306B\u5206\u3051\u3066\u8AAD\u307F\u8FBC\u3093\u3067\u304F\u3060\u3055\u3044\u3002");
+      throw new Error("The file contains duplicate energy values. Import each measurement region separately.");
     }
     x.push(energy);
     y.push(intensity);
@@ -3314,6 +3548,11 @@ function splitDelimited(line2, separator) {
   return fields2;
 }
 function namedColumns(fields2) {
+  if (/^abscissa\b/i.test(fields2[0]) && /^ordinate\b/i.test(fields2[1])) {
+    const sourceAxis = fields2[5];
+    const xLabel2 = /^original\s+(?:binding|kinetic)\s+energy\b/i.test(sourceAxis) ? sourceAxis : fields2[0];
+    return { x: 0, y: 1, xLabel: xLabel2, yLabel: fields2[1] };
+  }
   let x = -1;
   let y = -1;
   let xLabel;
@@ -3364,6 +3603,7 @@ function numericTables(rows, { decimalComma, spreadsheet = false }) {
     const header = fields2.length > 1 ? namedColumns(fields2) : null;
     if (header) {
       columns = header;
+      if (!spreadsheet) columns.analysis = findCsvAnalysisColumns(fields2);
       active = null;
       continue;
     }
@@ -3386,25 +3626,29 @@ function numericTables(rows, { decimalComma, spreadsheet = false }) {
       continue;
     }
     if (!active) {
-      active = { pairs: [], columns, positions: { x: xIndex, y: yIndex } };
+      active = { pairs: [], columns, positions: { x: xIndex, y: yIndex }, decimalComma };
       tables.push(active);
     }
-    active.pairs.push([x, y]);
+    active.pairs.push(active.columns?.analysis ? [x, y, fields2] : [x, y]);
   }
   return tables.filter(({ pairs }) => pairs.length >= MIN_POINTS);
 }
 function tableToSpectrum(table, filename, name = filenameStem(filename)) {
   if (table.invalidRow) {
-    throw new Error(`${table.invalidRow}\u884C\u76EE\u306E\u30A8\u30CD\u30EB\u30AE\u30FC\u5024\u307E\u305F\u306F\u5F37\u5EA6\u304C\u6570\u5024\u306B\u306A\u3063\u3066\u3044\u307E\u305B\u3093\u3002`);
+    throw new Error(`Row ${table.invalidRow} has a non-numeric energy or intensity value.`);
   }
   const { xLabel = "", yLabel = "" } = table.columns ?? {};
-  return makeSpectrum(table.pairs, {
+  const spectrum = makeSpectrum(table.pairs, {
     name,
     filename,
     xUnit: xLabel,
     yUnit: intensityUnit(yLabel),
     energyScale: axisScale(xLabel) ?? "binding"
   });
+  if (table.columns?.analysis) {
+    spectrum.analysis = readCsvAnalysis(table.columns.analysis, table.pairs, (value) => asNumber(value, table.decimalComma));
+  }
+  return spectrum;
 }
 function parseDelimited(text, filename) {
   const lines = text.split(/\r\n|\n|\r/).map((line2) => line2.trim());
@@ -3418,7 +3662,7 @@ function parseDelimited(text, filename) {
     }
   }
   if (!best) {
-    throw new Error("CSV\u30FBTSV\u30FB\u30C6\u30AD\u30B9\u30C8\u3067\u3001\u30A8\u30CD\u30EB\u30AE\u30FC\u5217\u3068\u5F37\u5EA6\u5217\u304C\u3042\u308B\u30C7\u30FC\u30BF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002");
+    throw new Error("Choose a CSV, TSV, or text file with energy and intensity columns.");
   }
   return tableToSpectrum(best, filename);
 }
@@ -3433,16 +3677,16 @@ async function parseXlsx(bytes, filename) {
     try {
       regions.push(tableToSpectrum(table, filename, name));
     } catch (error) {
-      invalidSheet ??= new Error(`\u300C${name}\u300D\u30B7\u30FC\u30C8\u306E${error.message}`);
+      invalidSheet ??= new Error(`Sheet "${name}". ${error.message}`);
     }
   }
   if (regions.length) return { ...regions[0], regions };
-  throw invalidSheet ?? new Error("XLSX\u306E\u5404\u30B7\u30FC\u30C8\u306B\u3001\u30A8\u30CD\u30EB\u30AE\u30FC\u3068\u5F37\u5EA6\u306E\u6570\u5024\u30923\u884C\u4EE5\u4E0A\u5165\u308C\u3066\u304F\u3060\u3055\u3044\u3002");
+  throw invalidSheet ?? new Error("Choose an XLSX workbook with at least three rows of numeric energy and intensity values in a worksheet.");
 }
 function parseVamas(text, filename) {
   const lines = text.split(/\r\n|\n|\r/);
   let cursor = 1;
-  const invalid = () => new Error("VAMAS\u306E\u30C7\u30FC\u30BF\u5F62\u5F0F\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+  const invalid = () => new Error("The VAMAS data format could not be read.");
   function next() {
     if (cursor >= lines.length) throw invalid();
     return lines[cursor++].trim();
@@ -3466,14 +3710,14 @@ function parseVamas(text, filename) {
   const experimentMode = next().toUpperCase();
   const scanMode = next().toUpperCase();
   if (experimentMode !== "NORM" || !["REGULAR", "IRREGULAR"].includes(scanMode)) {
-    throw new Error("VAMAS\u306FNORM\u30E2\u30FC\u30C9\u306EREGULAR\u30FBIRREGULAR\u30B9\u30AD\u30E3\u30F3\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059\u3002");
+    throw new Error("VAMAS import supports REGULAR and IRREGULAR scans in NORM mode.");
   }
   count();
   const experimentVariables = count();
   skip(experimentVariables * 2);
   const blockOverrides = number();
   if (blockOverrides !== 0) {
-    throw new Error("\u30D6\u30ED\u30C3\u30AF\u9805\u76EE\u3092\u7701\u7565\u3057\u305FVAMAS\u306F\u3001\u30A8\u30CD\u30EB\u30AE\u30FC\u30FB\u5F37\u5EA6\u306E2\u5217\u306B\u66F8\u304D\u51FA\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+    throw new Error("For VAMAS files with omitted block fields, export the energy and intensity as two columns and import those.");
   }
   skip(count());
   const futureExperimentFields = count();
@@ -3487,7 +3731,7 @@ function parseVamas(text, filename) {
     skip(count());
     const technique = next().toUpperCase();
     if (!["XPS", "ESCA"].includes(technique)) {
-      throw new Error("XPS\u30B9\u30DA\u30AF\u30C8\u30EB\u3092\u542B\u3080VAMAS\u30D5\u30A1\u30A4\u30EB\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002");
+      throw new Error("Choose a VAMAS file with XPS spectra.");
     }
     skip(experimentVariables);
     skip(1);
@@ -3510,7 +3754,7 @@ function parseVamas(text, filename) {
     const energy = regular ? { label: xLabel, unit: xUnit } : variables[0];
     const signal = variables[regular ? 0 : 1];
     if (!/^(?:[mk]?ev)$/i.test(energy.unit)) {
-      throw new Error("VAMAS\u306E\u30A8\u30CD\u30EB\u30AE\u30FC\u5358\u4F4D\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      throw new Error("VAMAS energy units must be eV, meV, or keV.");
     }
     if (regular && xStep === 0) throw invalid();
     skip(7);
@@ -3530,7 +3774,7 @@ function parseVamas(text, filename) {
     }
     regions.push(
       makeSpectrum(pairs, {
-        name: blockName || [species, transition].filter(Boolean).join(" ") || `\u9818\u57DF ${block + 1}`,
+        name: blockName || [species, transition].filter(Boolean).join(" ") || `Region ${block + 1}`,
         filename,
         xUnit: energy.unit,
         yUnit: /^d$/i.test(signal.unit) ? intensityUnit(signal.label) : signal.unit,
@@ -3545,17 +3789,17 @@ function parseVamas(text, filename) {
 function parseSpectrum(text, filename = "") {
   const source = text.replace(/^\uFEFF/, "");
   if (source.includes("\0")) {
-    throw new Error("\u30C6\u30AD\u30B9\u30C8\u5F62\u5F0F\u3067\u4FDD\u5B58\u3057\u305F\u30A8\u30CD\u30EB\u30AE\u30FC\u3068\u5F37\u5EA6\u306E\u30C7\u30FC\u30BF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002");
+    throw new Error("Choose a supported file with energy and intensity data.");
   }
   if (VAMAS_SIGNATURE.test(source.trimStart())) return parseVamas(source.trimStart(), filename);
   if (/\.(?:vms|npl)$/i.test(filename)) {
-    throw new Error("VAMAS\u30D5\u30A1\u30A4\u30EB\uFF08ISO 14976\uFF09\u306E\u30D8\u30C3\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+    throw new Error("The VAMAS (ISO 14976) file header is missing or invalid.");
   }
   return parseDelimited(source, filename);
 }
 async function readSpectrumFile(file) {
   if (file.size > MAX_FILE_BYTES) {
-    throw new Error("24 MB\u4EE5\u4E0B\u306E\u30B9\u30DA\u30AF\u30C8\u30EB\u30D5\u30A1\u30A4\u30EB\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002");
+    throw new Error("Choose a spectrum file of 24 MB or less.");
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (/\.xlsx$/i.test(file.name)) return parseXlsx(bytes, file.name);
@@ -3575,12 +3819,12 @@ async function readSpectrumFile(file) {
   }
   return parseSpectrum(source, file.name);
 }
-var DEMO_SPECTRA = [{ id: "c1s", label: "C 1s \u2014 \u5408\u6210\u30C7\u30FC\u30BF" }];
+var DEMO_SPECTRA = [{ id: "c1s", label: "C 1s - Synthetic spectrum" }];
 function demoSpectrum() {
   const components = [
-    { label: "C\u2013C / C\u2013H", center: 284.8, fwhm: 1.15, height: 16700, mix: 0.28 },
-    { label: "C\u2013O", center: 286.3, fwhm: 1.35, height: 5700, mix: 0.32 },
-    { label: "O\u2013C=O", center: 288.75, fwhm: 1.4, height: 2900, mix: 0.34 }
+    { label: "C-C / C-H", center: 284.8, fwhm: 1.15, height: 16700, mix: 0.28 },
+    { label: "C-O", center: 286.3, fwhm: 1.35, height: 5700, mix: 0.32 },
+    { label: "O-C=O", center: 288.75, fwhm: 1.4, height: 2900, mix: 0.34 }
   ];
   const x = Array.from({ length: 241 }, (_, index) => (28200 + index * 5) / 100);
   const signal = x.map(
@@ -3628,100 +3872,191 @@ function spectrumToCsv({
   columns = [],
   xUnit = "eV",
   yUnit = "",
-  energyScale = "binding"
+  energyScale = "binding",
+  analysis
 }) {
-  const energyLabel = energyScale === "kinetic" ? "\u904B\u52D5\u30A8\u30CD\u30EB\u30AE\u30FC" : "\u7D50\u5408\u30A8\u30CD\u30EB\u30AE\u30FC";
+  const energyLabel = energyScale === "kinetic" ? "Kinetic Energy" : "Binding Energy";
+  const signalUnit = englishExportLabel(yUnit, "");
   const labels = [
-    `${energyLabel} (${xUnit})`,
-    yUnit ? `\u6E2C\u5B9A\u5F37\u5EA6 (${yUnit})` : "\u6E2C\u5B9A\u5F37\u5EA6",
-    ...columns.map(({ label }) => label)
+    `${energyLabel} (${englishExportLabel(xUnit, "eV")})`,
+    signalUnit ? `Measured Intensity (${signalUnit})` : "Measured Intensity",
+    ...columns.map(({ label }, index) => englishExportLabel(label, `Column ${index + 3}`))
   ];
+  const metadata = analysis && serializeCsvAnalysis(analysis);
+  if (metadata) labels.push(ANALYSIS_METADATA_COLUMN);
   const rows = [labels.map(csvLabel).join(",")];
   for (let row = 0; row < x.length; row += 1) {
     const index = energyScale === "kinetic" ? row : x.length - 1 - row;
-    rows.push(
-      [
-        csvValue(x[index]),
-        csvValue(y[index]),
-        ...columns.map(({ values }) => csvValue(values[index]))
-      ].join(",")
-    );
+    const cells = [csvValue(x[index]), csvValue(y[index]), ...columns.map(({ values }) => csvValue(values[index]))];
+    if (metadata) cells.push(row === 0 ? csvLabel(metadata) : "");
+    rows.push(cells.join(","));
   }
   return `\uFEFF${rows.join("\r\n")}\r
 `;
 }
 
+// xps-source:src/number-input.js
+var numberSelector = 'input[type="number"]';
+function increment(input, base) {
+  const field = input.dataset.field || /^constraint-([^-]+)-/.exec(input.id)?.[1];
+  if (field === "height") {
+    const magnitude = Math.abs(base);
+    return magnitude > 0 ? 10 ** (Math.floor(Math.log10(magnitude)) - 2) : 1;
+  }
+  return field === "mix" ? 1 : 0.01;
+}
+function startValue(input) {
+  if (Number.isFinite(input.valueAsNumber)) return input.valueAsNumber;
+  const constraint = /^(constraint-[^-]+)-(?:min|max)$/.exec(input.id);
+  if (constraint) {
+    const value = input.ownerDocument.getElementById(`${constraint[1]}-value`)?.valueAsNumber;
+    if (Number.isFinite(value)) return value;
+  }
+  return 0;
+}
+function adjust(input, direction) {
+  if (input.matches(":disabled") || input.readOnly) return;
+  const previous = input.value;
+  const customIncrement = Number(input.dataset.increment);
+  if (!(customIncrement > 0) && input.step && input.step !== "any") {
+    if (direction > 0) input.stepUp();
+    else input.stepDown();
+  } else {
+    const value = startValue(input);
+    const step = customIncrement > 0 && Number.isFinite(customIncrement) ? customIncrement : increment(input, value);
+    const next = value + direction * step;
+    if (!Number.isFinite(next) || next === value) return;
+    const limits = [input.min, input.max].map((limit, index) => limit !== "" && Number.isFinite(Number(limit)) ? Number(limit) : index === 0 ? -Infinity : Infinity);
+    const bounded = Math.max(limits[0], Math.min(limits[1], Number(next.toPrecision(15))));
+    input.valueAsNumber = bounded;
+  }
+  if (input.value === previous) return;
+  const Event = input.ownerDocument.defaultView.Event;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function enhance(input) {
+  if (input.parentElement?.classList.contains("number-input")) return;
+  const document2 = input.ownerDocument;
+  const label = input.getAttribute("aria-label") || [...input.labels || []].map((item) => item.textContent.trim()).join(" ") || "value";
+  const field = document2.createElement("div");
+  field.className = "number-input";
+  const controls = document2.createElement("div");
+  controls.className = "number-input-controls";
+  for (const [action, direction] of [["Increase", 1], ["Decrease", -1]]) {
+    const button = document2.createElement("button");
+    button.type = "button";
+    button.tabIndex = -1;
+    button.className = `number-input-${action.toLowerCase()}`;
+    button.title = `${action} ${label}`;
+    button.setAttribute("aria-label", button.title);
+    if (input.id) button.setAttribute("aria-controls", input.id);
+    button.addEventListener("pointerdown", (event) => event.preventDefault());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      adjust(input, direction);
+    });
+    controls.append(button);
+  }
+  input.replaceWith(field);
+  field.append(input, controls);
+  input.addEventListener("keydown", (event) => {
+    if (!["ArrowUp", "ArrowDown"].includes(event.key) || event.isComposing) return;
+    event.preventDefault();
+    adjust(input, event.key === "ArrowUp" ? 1 : -1);
+  });
+}
+function installNumberInputs(root = document) {
+  function inspect(node) {
+    if (node.matches?.(numberSelector)) enhance(node);
+    node.querySelectorAll?.(numberSelector).forEach(enhance);
+  }
+  inspect(root);
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) inspect(node);
+    }
+  });
+  observer.observe(root, { childList: true, subtree: true });
+  return () => observer.disconnect();
+}
+
 // xps-source:src/plot-launcher.js
 var PLOT_LAUNCHER_URL = "https://murajun620-crypto.github.io/plot_launcher_web/";
-var lineStyles = /* @__PURE__ */ new Map([
-  ["-", "-"],
-  ["--", "--"],
-  ["-.", "-."],
-  [":", ":"],
-  ["solid", "-"],
-  ["dashed", "--"],
-  ["dash", "--"],
-  ["dashdot", "-."],
-  ["dotted", ":"],
-  ["dot", ":"]
-]);
-function projectCsv(csv) {
-  const columns = [];
-  const bomLength = csv.startsWith("\uFEFF") ? 1 : 0;
-  let index = bomLength;
-  let value = "";
-  let quoted = false;
-  for (; index < csv.length; index += 1) {
-    const char = csv[index];
-    if (char === '"') {
-      if (quoted && csv[index + 1] === '"') {
-        value += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (!quoted && char === ",") {
-      columns.push(value);
-      value = "";
-    } else if (!quoted && (char === "\n" || char === "\r")) {
-      break;
-    } else {
-      value += char;
-    }
-  }
-  columns.push(value);
-  const rowBreak = /\r\n?|\n/g;
-  rowBreak.lastIndex = index;
-  let rowCount = 0;
-  while (rowBreak.test(csv) && rowBreak.lastIndex < csv.length) {
-    rowCount += 1;
-    if (rowCount > 2e5) throw new Error("PlotLauncher\u306B\u6E21\u305B\u308B\u30C7\u30FC\u30BF\u306F200,000\u884C\u307E\u3067\u3067\u3059\u3002");
-  }
-  if (columns.length > 256) throw new Error("PlotLauncher\u306B\u6E21\u305B\u308B\u30C7\u30FC\u30BF\u306F256\u5217\u307E\u3067\u3067\u3059\u3002");
-  const names = /* @__PURE__ */ new Set();
-  const unique = columns.map((column, columnIndex2) => {
-    const title = column.trim().slice(0, 200);
-    const base = title && !title.startsWith("Unnamed:") ? title : `\u5217 ${columnIndex2 + 1}`;
-    let name = base;
-    let suffix = 2;
-    while (names.has(name)) {
-      const ending = ` [${suffix}]`;
-      name = `${base.slice(0, 200 - ending.length)}${ending}`;
-      suffix += 1;
-    }
-    names.add(name);
-    return name;
+var MAX_ROWS2 = 2e5;
+var MAX_COLUMNS = 256;
+var MAX_CSV_BYTES = 30 * 1024 * 1024;
+var PEAK_COLORS = ["#704dd9", "#008666", "#b26413", "#be3c78", "#1979b4", "#b84225"];
+var PALETTE_COLOR = /^#[0-9a-f]{6}$/i;
+function peakLabels(components) {
+  if (!components.length) return ["Peak"];
+  return components.map(({ label }, index) => {
+    const prefix = `Peak ${index + 1}`;
+    const name = englishExportLabel(label, prefix).slice(0, 175);
+    return name === prefix ? prefix : `${prefix} - ${name}`;
   });
-  if (unique.every((name, columnIndex2) => name === columns[columnIndex2])) {
-    return { columns: unique, csv };
+}
+function escapeCsvHeader(text) {
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+function csvValue2(value) {
+  return Number.isFinite(value) ? value : "";
+}
+function toPlotLauncherFitCsv({
+  x,
+  y,
+  residual,
+  background,
+  corrected,
+  originalX,
+  fit,
+  components = [],
+  energyScale = "binding"
+}) {
+  if (x.length !== y.length || !x.length) {
+    throw new Error("Plot Launcher requires matching energy and intensity values.");
   }
-  const header = unique.map((name) => `"${name.replaceAll('"', '""')}"`).join(",");
-  return { columns: unique, csv: `${csv.slice(0, bomLength)}${header}${csv.slice(index)}` };
+  if (x.length > MAX_ROWS2) {
+    throw new Error("Plot Launcher can open up to 200,000 points. Export a standard CSV for larger spectra.");
+  }
+  const labels = peakLabels(components);
+  if (7 + labels.length > MAX_COLUMNS) {
+    throw new Error("Plot Launcher supports up to 256 CSV columns.");
+  }
+  const axis = energyScale === "kinetic" ? "kinetic" : "binding";
+  const header = [
+    "Abscissa",
+    "Ordinate",
+    "Residual",
+    "Background",
+    "Background-subtracted intensity",
+    `Original ${axis} energy (eV)`,
+    "Synthesize",
+    ...labels
+  ];
+  const rows = [header.map(escapeCsvHeader).join(",")];
+  for (let row = 0; row < x.length; row += 1) {
+    const index = energyScale === "kinetic" ? row : x.length - 1 - row;
+    const values = [
+      x[index],
+      y[index],
+      residual?.[index],
+      background?.[index],
+      corrected?.[index],
+      originalX?.[index] ?? x[index],
+      fit?.[index]
+    ];
+    for (const { values: component } of components) values.push(component[index]);
+    if (!components.length) values.push(void 0);
+    rows.push(values.map(csvValue2).join(","));
+  }
+  return `\uFEFF${rows.join("\r\n")}\r
+`;
 }
 function encodeCsv(csv) {
   const bytes = new TextEncoder().encode(csv);
-  if (bytes.length > 30 * 1024 * 1024) {
-    throw new Error("PlotLauncher\u306B\u6E21\u305B\u308BCSV\u306F30 MB\u307E\u3067\u3067\u3059\u3002");
+  if (bytes.length > MAX_CSV_BYTES) {
+    throw new Error("Plot Launcher projects support up to 30 MB of CSV data.");
   }
   let binary = "";
   for (let index = 0; index < bytes.length; index += 32768) {
@@ -3731,18 +4066,21 @@ function encodeCsv(csv) {
 }
 function toPlotLauncherProject({
   name,
-  csv,
-  xLabel = "Binding energy",
-  yUnit = "arb. units",
-  series,
-  reverseX = true
+  yUnit,
+  energyScale = "binding",
+  components = [],
+  ...data
 }) {
-  const stem = String(name || "xps-fit").replace(/\.(?:csv|tsv|txt|vms|vamas|plotproject)$/i, "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 120).replace(/[. ]+$/, "") || "xps-fit";
+  const stem = englishExportFilename(name, "xps-fit").slice(0, 120);
   const filename = `${stem}.csv`;
-  const { columns, csv: embeddedCsv } = projectCsv(csv);
-  if (series.length < 1 || series.length > 32 || series.some(({ column }) => !Number.isInteger(column) || column < 1 || column >= columns.length)) {
-    throw new Error("PlotLauncher\u7528\u306E\u30B0\u30E9\u30D5\u7CFB\u5217\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-  }
+  const csv = toPlotLauncherFitCsv({ ...data, energyScale, components });
+  const fills = components.map(({ color }, index) => ({
+    x: 0,
+    upper: index + 7,
+    lower: 3,
+    color: PALETTE_COLOR.test(color) ? color : PEAK_COLORS[index % PEAK_COLORS.length],
+    alpha: 0.3
+  }));
   return JSON.stringify({
     format: "plotlauncher-project",
     version: 1,
@@ -3751,33 +4089,41 @@ function toPlotLauncherProject({
       version: 1,
       rangeDefaultsVersion: 1,
       data: { filename, sheet: "CSV", headerRow: 1 },
-      // The dedicated XPS Fit plot expects fixed-position columns and hides individual series controls.
-      plotType: reverseX ? "XPS Core" : "General",
+      plotType: "XPS Fit",
       axes: {
-        xLabel,
+        xLabel: energyScale === "kinetic" ? "Kinetic energy" : "Binding energy",
         xUnit: "eV",
         yLabel: "Intensity",
-        yUnit,
+        yUnit: englishExportLabel(yUnit, "arb. units"),
         width: 5.2,
         height: 3.6,
-        legend: series.length > 1
+        legend: false
       },
-      series: series.map(({ column, label, color, style, mode }) => ({
+      series: [{
         x: 0,
-        y: column,
-        xColumn: columns[0],
-        yColumn: columns[column],
-        name: label || columns[column],
-        ...color && { color },
-        mode: ["line", "scatter", "line+scatter"].includes(mode) ? mode : "line",
-        lineStyle: lineStyles.get(style) || "-",
-        lineWidth: 1,
-        markerSize: 8
-      })),
-      options: {},
+        y: 1,
+        xColumn: "Abscissa",
+        yColumn: "Ordinate",
+        name: "Measured intensity",
+        color: "#253853",
+        mode: "line",
+        visible: true
+      }],
+      options: {
+        scatterSize: 6,
+        scatterEdgeWidth: 0.4,
+        scatterEdgeColor: "#3c3c3c",
+        scatterFaceColor: "#ffffff",
+        scatterAlpha: 0.65,
+        fitLineWidth: data.fit?.some(Number.isFinite) ? 1 : 0,
+        fitLineColor: "#5441d0",
+        bgLineWidth: 0.7,
+        bgLineColor: "#6f7890",
+        fills
+      },
       annotations: []
     },
-    data: { filename, base64: encodeCsv(embeddedCsv), sheetIndex: 0, headerRow: 1, sample: false },
+    data: { filename, base64: encodeCsv(csv), sheetIndex: 0, headerRow: 1, sample: false },
     fonts: [],
     workspace: { saveName: stem, pngDpi: 1200, view: { zoom: 1, x: 0, y: 0 }, sections: [] }
   });
@@ -4162,6 +4508,130 @@ function fitPeaks(points, background, peaks, { maxIterations = 180 } = {}) {
   };
 }
 
+// xps-source:src/restore-peaks.js
+var MAX_WIDE_SAMPLES = 1024;
+var APEX_NEIGHBORS = 128;
+var PURE_MIX_TOLERANCE = 1e-7;
+function energyOf(point) {
+  return typeof point === "number" ? point : point?.x;
+}
+function restorePeakFromCurve(points, values) {
+  if (!points.length || points.length !== values.length) {
+    throw new RangeError("A saved peak needs one intensity per energy.");
+  }
+  let last = -Infinity;
+  let apex = 0;
+  for (let index = 0; index < points.length; index++) {
+    const energy = energyOf(points[index]);
+    if (!Number.isFinite(energy) || energy <= last || !Number.isFinite(values[index])) {
+      throw new RangeError("A saved peak needs finite intensities and ascending energies.");
+    }
+    if (values[index] > values[apex]) apex = index;
+    last = energy;
+  }
+  const first = energyOf(points[0]);
+  const span = last - first;
+  if (!Number.isFinite(span)) throw new RangeError("The saved peak energy span is too large.");
+  const height = Math.max(0, values[apex]);
+  if (height === 0) {
+    return {
+      center: first + span / 2,
+      fwhm: Math.max(span / 12, 1e-6),
+      height: 0,
+      mix: 0.35,
+      shape: "pseudo-voigt"
+    };
+  }
+  const curve = [];
+  const stride = Math.ceil(points.length / MAX_WIDE_SAMPLES);
+  for (let index = 0; index < points.length; index++) {
+    if (index % stride === 0 || Math.abs(apex - index) <= APEX_NEIGHBORS || index === points.length - 1) {
+      curve.push({ x: energyOf(points[index]), y: Math.max(0, values[index]) / height });
+    }
+  }
+  const background = new Float64Array(curve.length);
+  const estimate = estimatePeak(curve, background);
+  if (curve.length < 4) return { ...estimate, height };
+  const atEdge = apex === 0 || apex === points.length - 1;
+  const initial = atEdge ? { ...estimate, bounds: { center: [first - span, last + span] } } : estimate;
+  const { peaks: [{ center, fwhm, height: fittedHeight, mix }] } = fitPeaks(curve, background, [initial], { maxIterations: 60 });
+  const fitted = { center, fwhm, height: fittedHeight * height, mix, shape: estimate.shape };
+  if (fitted.mix <= PURE_MIX_TOLERANCE) {
+    return { ...fitted, mix: 0, shape: "gaussian" };
+  }
+  if (fitted.mix >= 1 - PURE_MIX_TOLERANCE) {
+    return { ...fitted, mix: 1, shape: "lorentzian" };
+  }
+  return fitted;
+}
+
+// xps-source:src/updates.js
+var published = "https://murajun620-crypto.github.io/xps-workbench/";
+var releasePattern = /^\d{1,5}\.\d{1,5}\.\d{1,5}$/;
+var buildPattern = /^[0-9a-f]{12}$/;
+function compareReleases(first, second) {
+  const current = first.split(".").map(Number);
+  const latest = second.split(".").map(Number);
+  for (let i = 0; i < current.length; i++) {
+    if (current[i] !== latest[i]) return current[i] - latest[i];
+  }
+  return 0;
+}
+function installUpdateCheck() {
+  const version = document.querySelector('meta[name="xps-version"]').content;
+  const build = document.querySelector('meta[name="xps-build"]').content;
+  document.getElementById("current-version").textContent = releasePattern.test(version) ? `v${version}` : "Dev";
+  const button = document.getElementById("check-updates");
+  const dialog = document.getElementById("update-dialog");
+  const status = document.getElementById("update-status");
+  const openUpdate = document.getElementById("open-update");
+  let active;
+  dialog.addEventListener("close", () => {
+    if (dialog.open) return;
+    active?.abort();
+    active = void 0;
+  });
+  button.addEventListener("click", async () => {
+    if (dialog.open) return;
+    active?.abort();
+    const controller = new AbortController();
+    active = controller;
+    const timeout = setTimeout(() => controller.abort(), 8e3);
+    const base = location.protocol === "file:" ? published : document.baseURI;
+    const url = new URL("./version.json", base);
+    url.searchParams.set("check", String(Date.now()));
+    openUpdate.hidden = true;
+    status.textContent = "Checking for updates\u2026";
+    dialog.showModal();
+    try {
+      const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error("Missing release information.");
+      const latest = await response.json();
+      if (typeof latest.version !== "string" || !releasePattern.test(latest.version) || typeof latest.build !== "string" || !buildPattern.test(latest.build)) {
+        throw new Error("Invalid release information.");
+      }
+      if (active !== controller || !dialog.open) return;
+      const order = releasePattern.test(version) ? compareReleases(version, latest.version) : -1;
+      if (order < 0 || order === 0 && latest.build !== build) {
+        status.textContent = `Version ${latest.version} is available. Open it in a new tab to keep this session open.`;
+        const target = new URL(".", url);
+        target.searchParams.set("v", `${latest.version}-${latest.build}`);
+        openUpdate.href = target.href;
+        openUpdate.hidden = false;
+      } else {
+        status.textContent = `You\u2019re up to date (v${version}).`;
+      }
+    } catch {
+      if (active === controller && dialog.open) {
+        status.textContent = "Could not check for updates. Check your connection and try again.";
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (active === controller) active = void 0;
+    }
+  });
+}
+
 // xps-source:src/app.js
 var byId = (id) => document.getElementById(id);
 var iconPaths = {
@@ -4177,7 +4647,8 @@ var iconPaths = {
   sliders: '<path d="M7 4v5m0 4v7m5-16v9m0 4v3m5-16v3m0 4v9M5 9h4v4H5zm5 4h4v4h-4zm5-6h4v4h-4z"/>',
   trash: '<path d="M5 7h14M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
-  shield: '<path d="M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Zm-3-10 2 2 4-4"/>'
+  shield: '<path d="M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Zm-3-10 2 2 4-4"/>',
+  refresh: '<path d="M20 7v5h-5M4 17v-5h5m10.45 0a7.5 7.5 0 0 0-13.32-4.7m-1.58 4.7a7.5 7.5 0 0 0 13.32 4.7"/>'
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name]}</svg>`;
@@ -4186,15 +4657,15 @@ for (const item of document.querySelectorAll("[data-icon]")) item.innerHTML = ic
 var peakColors = ["#b9a0ff", "#51daba", "#ffc47b", "#fa91c3", "#79caff", "#ff957f", "#d4ed80", "#a3a6ff"];
 var darkPeakColors = ["#704dd9", "#008666", "#b26413", "#be3c78", "#1979b4", "#b84225", "#5d7611", "#494dc8"];
 var shapeOptions = [
-  ["pseudo-voigt", "\u64ECVoigt"],
+  ["pseudo-voigt", "Pseudo-Voigt"],
   ["gaussian", "Gaussian"],
   ["lorentzian", "Lorentzian"]
 ];
 var fields = [
-  ["center", "\u4F4D\u7F6E (eV)", -Infinity, Infinity],
+  ["center", "Center (eV)", -Infinity, Infinity],
   ["fwhm", "FWHM (eV)", 1e-6, Infinity],
-  ["height", "\u9AD8\u3055", 0, Infinity],
-  ["mix", "L\u6BD4 (%)", 0, 1]
+  ["height", "Height", 0, Infinity],
+  ["mix", "Lorentzian fraction (%)", 0, 1]
 ];
 var maxPeaks = 12;
 var state = {
@@ -4228,7 +4699,7 @@ function decimal(value, digits = 3) {
   return Number.isFinite(value) ? Math.abs(value) >= 1e7 || value !== 0 && Math.abs(value) < 10 ** -digits ? value.toExponential(2) : Number(value.toFixed(digits)).toString() : "\u2014";
 }
 function displayNumber(value, digits) {
-  return Number.isFinite(value) ? value.toLocaleString("ja-JP", { maximumFractionDigits: digits }) : "\u2014";
+  return Number.isFinite(value) ? value.toLocaleString("en-US", { maximumFractionDigits: digits }) : "\u2014";
 }
 function rangeOf(points) {
   return [points[0].x, points[points.length - 1].x];
@@ -4248,7 +4719,7 @@ function toast(message) {
   }, 3700);
 }
 function energyName() {
-  return state.spectrum.energyScale === "kinetic" ? "\u904B\u52D5\u30A8\u30CD\u30EB\u30AE\u30FC" : "\u7D50\u5408\u30A8\u30CD\u30EB\u30AE\u30FC";
+  return state.spectrum.energyScale === "kinetic" ? "Kinetic energy" : "Binding energy";
 }
 function buildPeak(peak) {
   const id = state.nextId++;
@@ -4265,6 +4736,72 @@ function recalculate() {
 }
 function updatePreview() {
   state.preview = evaluateFit(state.section, state.background.values, state.peaks);
+}
+function savedSection(values) {
+  if (!values) return null;
+  const section = values.slice(state.start, state.start + state.section.length);
+  return section.length === state.section.length && section.every(Number.isFinite) ? section : null;
+}
+function savedRange(saved) {
+  const full = rangeOf(state.points);
+  const range = saved?.metadata?.range;
+  if (range && range[0] >= full[0] && range[1] <= full[1] && state.points.filter(({ x }) => x >= range[0] && x <= range[1]).length >= 3) {
+    return range;
+  }
+  for (const values of [saved?.fit, saved?.corrected, saved?.background]) {
+    if (!values) continue;
+    const first = values.findIndex(Number.isFinite);
+    const last = values.findLastIndex(Number.isFinite);
+    if (first >= 0 && last - first >= 2) return [state.points[first].x, state.points[last].x];
+  }
+  return full;
+}
+function restoreAnalysis(saved) {
+  const metadata = saved.metadata;
+  const baseline = savedSection(saved.background);
+  if (baseline) {
+    if (!metadata && state.method !== "none") {
+      const linear = analyzeBackground(state.section, "linear").values;
+      const error2 = (values) => values.reduce((sum, value, i) => sum + (value - baseline[i]) ** 2, 0);
+      if (error2(linear) < error2(state.background.values)) state.method = "linear";
+    }
+    state.background = { values: baseline, status: "ok", iterations: 0 };
+  }
+  const curves = saved.components.slice(0, maxPeaks).map(({ values }) => savedSection(values));
+  if (metadata) {
+    state.peaks = metadata.peaks.slice(0, maxPeaks).map((peak) => {
+      const bounds = Object.fromEntries(Object.entries(peak.bounds || {}).map(([key, [low, high]]) => [key, [low ?? -Infinity, high ?? Infinity]]));
+      return { ...peak, bounds };
+    });
+    state.nextId = Math.max(0, ...state.peaks.map(({ id }) => id + 1));
+  } else {
+    state.peaks = curves.flatMap((curve, i) => {
+      if (!curve) return [];
+      const label = saved.components[i].label;
+      return [buildPeak({ ...restorePeakFromCurve(state.section, curve), label })];
+    });
+  }
+  updatePreview();
+  const fit = savedSection(saved.fit);
+  if (!fit || !state.peaks.length) return;
+  const residuals = savedSection(saved.residual) || fit.map((value, i) => state.section[i].y - value);
+  const count = residuals.length;
+  const mean = state.section.reduce((sum, { y }) => sum + y / count, 0);
+  const total = state.section.reduce((sum, { y }) => sum + (y - mean) ** 2, 0);
+  const error = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const status = metadata?.status || "restored";
+  state.result = {
+    peaks: state.peaks,
+    fit,
+    residuals,
+    rSquared: total > 0 ? 1 - error / total : null,
+    rmse: Math.sqrt(error / count),
+    iterations: metadata?.iterations ?? 0,
+    status,
+    converged: status === "converged" || status === "fixed",
+    components: metadata ? state.peaks.map((_, i) => curves[i] || state.preview.components[i]) : curves.filter(Boolean)
+  };
+  state.preview = state.result;
 }
 function invalidate() {
   state.revision++;
@@ -4283,10 +4820,15 @@ function assignSpectrum(spectrum) {
   invalidate();
   notice();
   state.spectrum = spectrum;
-  state.original = spectrum.x.map((x, index) => ({ x, y: spectrum.y[index] }));
-  state.points = state.original;
-  state.offset = 0;
-  state.range = spectrum.range || rangeOf(state.points);
+  state.points = spectrum.x.map((x, index) => ({ x, y: spectrum.y[index] }));
+  const saved = spectrum.analysis;
+  state.offset = saved?.metadata?.offset ?? (saved?.originalX ? spectrum.x[0] - saved.originalX[0] : 0);
+  state.original = !saved?.originalX && !state.offset ? state.points : state.points.map(({ x, y }, i) => ({
+    x: saved?.originalX?.[i] ?? x - state.offset,
+    y
+  }));
+  state.range = spectrum.range || savedRange(saved);
+  if (saved) state.method = saved.metadata?.method || (saved.background ? "shirley" : "none");
   state.zoom = rangeOf(state.points);
   state.pick = null;
   state.view = "raw";
@@ -4298,7 +4840,8 @@ function assignSpectrum(spectrum) {
   byId("observed").value = "";
   byId("target").value = "";
   recalculate();
-  if (!state.peaks.length) {
+  if (saved) restoreAnalysis(saved);
+  if (!state.peaks.length && !saved?.metadata) {
     state.peaks = [buildPeak(estimatePeak(state.section, state.background.values))];
     updatePreview();
   }
@@ -4317,9 +4860,14 @@ function syncControls() {
   byId("offset").value = state.offset;
   byId("range-min").value = state.range[0];
   byId("range-max").value = state.range[1];
+  const [minimum, maximum] = rangeOf(state.points);
+  for (const id of ["range-min", "range-max"]) {
+    byId(id).min = minimum;
+    byId(id).max = maximum;
+  }
   byId("background").value = state.method;
   const shift = state.offset > 0 ? "+" : state.offset < 0 ? "\u2212" : "";
-  byId("shift-info").textContent = `\u9069\u7528\u4E2D\u3000${shift}${Math.abs(state.offset).toFixed(3)} eV`;
+  byId("shift-info").textContent = `Applied: ${shift}${Math.abs(state.offset).toFixed(3)} eV`;
 }
 function applyShift(offset) {
   if (!Number.isFinite(offset)) return;
@@ -4334,7 +4882,7 @@ function applyShift(offset) {
     shifted = shiftSpectrum(state.original, offset);
     if (shifted.some(({ x }, i) => i && x <= shifted[i - 1].x)) throw new RangeError();
   } catch {
-    notice("\u6709\u52B9\u306A\u30A8\u30CD\u30EB\u30AE\u30FC\u523B\u307F\u3092\u4FDD\u3066\u308B\u30B7\u30D5\u30C8\u91CF\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+    notice("Enter an offset that preserves distinct energy values.");
     return;
   }
   const move = (value) => value - previous + offset;
@@ -4344,7 +4892,7 @@ function applyShift(offset) {
   });
   const [low, high] = moveRange(state.range);
   if (shifted.filter(({ x }) => x >= low && x <= high).length < 3) {
-    notice("\u3053\u306E\u30B7\u30D5\u30C8\u91CF\u3067\u306F\u89E3\u6790\u7BC4\u56F2\u5185\u306E\u30C7\u30FC\u30BF\u70B9\u3092\u4FDD\u6301\u3067\u304D\u307E\u305B\u3093\u3002");
+    notice("This offset leaves too few points in the analysis range.");
     return;
   }
   invalidate();
@@ -4370,13 +4918,13 @@ function applyShift(offset) {
 function setRange(min, max) {
   const full = rangeOf(state.points);
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min || min < full[0] - 1e-8 || max > full[1] + 1e-8) {
-    notice(`\u6E2C\u5B9A\u7BC4\u56F2\uFF08${decimal(full[0], 6)}\u2013${decimal(full[1], 6)} eV\uFF09\u5185\u3067\u3001\u4E0B\u9650\u3088\u308A\u5927\u304D\u3044\u4E0A\u9650\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    notice(`Enter an increasing range within ${decimal(full[0], 6)} to ${decimal(full[1], 6)} eV.`);
     return;
   }
   min = Math.max(min, full[0]);
   max = Math.min(max, full[1]);
   if (state.points.filter(({ x }) => x >= min && x <= max).length < 3) {
-    notice("\u89E3\u6790\u7BC4\u56F2\u306B\u5C11\u306A\u304F\u3068\u30823\u70B9\u306E\u6E2C\u5B9A\u30C7\u30FC\u30BF\u3092\u542B\u3081\u3066\u304F\u3060\u3055\u3044\u3002");
+    notice("Include at least three measured points in the analysis range.");
     return;
   }
   invalidate();
@@ -4405,7 +4953,7 @@ function renderChart() {
   }
   add(
     "measured",
-    corrected ? "\u80CC\u666F\u6E1B\u7B97\u5F8C" : "\u6E2C\u5B9A\u30C7\u30FC\u30BF",
+    corrected ? "Background-subtracted" : "Measured",
     "#f2f4ff",
     corrected ? sparseAligned(state.section.map(({ y }, i) => y - background[i])) : measurement,
     { primary: true, marker: true, order: 4 }
@@ -4413,14 +4961,14 @@ function renderChart() {
   if (state.peaks.length) {
     add(
       "total",
-      state.result ? "\u5408\u6210\u30D5\u30A3\u30C3\u30C8" : "\u521D\u671F\u30E2\u30C7\u30EB",
+      state.result ? "Total fit" : "Initial model",
       "#a995ff",
       sparseAligned(fit.map((y, i) => corrected ? y - background[i] : y)),
       { width: 2.4, order: 3 }
     );
   }
   if (!corrected && state.method !== "none") {
-    add("background", "\u80CC\u666F", "#9eaac7", sparseAligned(background), { dash: true, order: 2 });
+    add("background", "Background", "#9eaac7", sparseAligned(background), { dash: true, order: 2 });
   }
   const alignedBaseline = components.length ? sparseAligned(baseline) : null;
   components.forEach((values, index) => {
@@ -4434,7 +4982,7 @@ function renderChart() {
   });
   const residualExists = !!state.result && state.peaks.length > 0;
   if (residualExists) {
-    add("residual", "\u6B8B\u5DEE", "#9cb3ff", [], { residualOnly: true });
+    add("residual", "Residual", "#9cb3ff", [], { residualOnly: true });
   }
   const legend = byId("legend");
   const focusedId = legend.contains(document.activeElement) ? document.activeElement.dataset.series : null;
@@ -4458,13 +5006,13 @@ function renderChart() {
     residual: residualExists && !state.disabledSeries.has("residual") ? sparseAligned(residuals) : null,
     reverse: state.spectrum.energyScale !== "kinetic",
     xLabel: `${energyName()} (eV)`,
-    yLabel: state.spectrum.yUnit ? `\u5F37\u5EA6 (${state.spectrum.yUnit})` : "\u5F37\u5EA6"
+    yLabel: state.spectrum.yUnit ? `Intensity (${state.spectrum.yUnit})` : "Intensity"
   });
 }
 function render() {
   const name = state.spectrum.name;
   byId("chart-title").textContent = name;
-  byId("spectrum-meta").textContent = `${state.spectrum.filename || name}  \xB7  ${state.points.length.toLocaleString("ja-JP")} \u70B9  \xB7  ${energyName()}`;
+  byId("spectrum-meta").textContent = `${state.spectrum.filename || name}  \xB7  ${state.points.length.toLocaleString("en-US")} points  \xB7  ${energyName()}`;
   for (const button of document.querySelectorAll("[data-view]")) {
     button.setAttribute("aria-pressed", button.dataset.view === state.view);
   }
@@ -4484,30 +5032,31 @@ function renderPick() {
   byId("pick-reference").setAttribute("aria-pressed", state.pick === "reference");
   byId("pick-reference").classList.toggle("active", state.pick === "reference");
   byId("plot-help").textContent = {
-    peak: "\u30D4\u30FC\u30AF\u306E\u4F4D\u7F6E\u3092\u30AF\u30EA\u30C3\u30AF \xB7 Esc\u3067\u30AD\u30E3\u30F3\u30BB\u30EB",
-    reference: "\u53C2\u7167\u306B\u4F7F\u3046\u6E2C\u5B9A\u4F4D\u7F6E\u3092\u30AF\u30EA\u30C3\u30AF \xB7 Esc\u3067\u30AD\u30E3\u30F3\u30BB\u30EB"
-  }[state.pick] || "\u30C9\u30E9\u30C3\u30B0\u3067\u62E1\u5927 \xB7 \u30AF\u30EA\u30C3\u30AF\u3067\u5EA7\u6A19\u3092\u78BA\u8A8D";
+    peak: "Click the peak center \xB7 Press Esc to cancel",
+    reference: "Click the measured reference peak \xB7 Press Esc to cancel"
+  }[state.pick] || "Drag to zoom \xB7 Click to inspect energy";
 }
 function renderBackground() {
   const info = byId("background-info");
   const warning = state.background.status !== "ok";
-  const messages = { "no-peak": "Shirley\u306E\u7A4D\u5206\u91CF\u304C\u4E0D\u8DB3\u3057\u305F\u305F\u3081Linear\u3092\u8868\u793A\u3057\u3066\u3044\u307E\u3059\u3002", "iteration-limit": "Shirley\u304C\u53CE\u675F\u3057\u306A\u304B\u3063\u305F\u305F\u3081Linear\u3092\u8868\u793A\u3057\u3066\u3044\u307E\u3059\u3002" };
+  const messages = { "no-peak": "Linear fallback: Shirley requires a positive peak area.", "iteration-limit": "Linear fallback: Shirley did not converge." };
   info.classList.toggle("warning", warning);
-  info.textContent = warning ? messages[state.background.status] : `\u89E3\u6790\u306B\u4F7F\u7528\u3000${state.section.length.toLocaleString("ja-JP")} \u70B9`;
+  info.textContent = warning ? messages[state.background.status] : `Analysis points: ${state.section.length.toLocaleString("en-US")}`;
 }
 function renderFit() {
   const status = byId("fit-status");
   const result = state.result;
   const labels = {
-    converged: "\u53CE\u675F",
-    fixed: "\u56FA\u5B9A\u5024\u3067\u8A55\u4FA1",
-    "stalled": "\u6700\u9069\u5316\u304C\u505C\u6EDE",
-    "iteration-limit": "\u53CD\u5FA9\u4E0A\u9650\u306B\u5230\u9054",
-    "insufficient-points": "\u81EA\u7531\u5909\u6570\u306B\u5BFE\u3057\u6E2C\u5B9A\u70B9\u304C\u4E0D\u8DB3"
+    converged: "Converged",
+    fixed: "Evaluated with fixed parameters",
+    "stalled": "Optimization stalled",
+    "iteration-limit": "Iteration limit reached",
+    "insufficient-points": "Too few points for the free parameters",
+    restored: "Restored fit"
   };
   status.classList.toggle("success", !!result?.converged);
-  status.classList.toggle("warning", !!result && !result.converged);
-  status.textContent = state.fitting ? "\u8A08\u7B97\u4E2D\u2026" : result ? labels[result.status] : "\u30D5\u30A3\u30C3\u30C8\u524D";
+  status.classList.toggle("warning", !!result && !result.converged && result.status !== "restored");
+  status.textContent = state.fitting ? "Fitting\u2026" : result ? labels[result.status] : "Fit not run";
   byId("r-squared").value = Number.isFinite(result?.rSquared) ? result.rSquared.toFixed(5) : "\u2014";
   byId("rmse").value = displayNumber(result?.rmse, 3);
   const button = byId("fit");
@@ -4524,6 +5073,10 @@ function rowInput(peak, key, label, digits) {
   } else {
     input.step = "any";
     input.value = decimal(peak[key], digits);
+    const [, , min, max] = fields.find(([field]) => field === key);
+    const [lower, upper] = peak.bounds?.[key] ?? [min, max];
+    if (Number.isFinite(lower)) input.min = lower;
+    if (Number.isFinite(upper)) input.max = upper;
   }
   return input;
 }
@@ -4535,7 +5088,7 @@ function renderPeaks() {
     const cell = body.insertRow().insertCell();
     cell.colSpan = 7;
     cell.className = "peak-empty";
-    cell.textContent = "\u300C\u30D4\u30FC\u30AF\u3092\u8FFD\u52A0\u300D\u3092\u62BC\u3057\u3001\u30B0\u30E9\u30D5\u3067\u6210\u5206\u306E\u4F4D\u7F6E\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+    cell.textContent = "Select Add peak, then click the component center in the plot.";
     return;
   }
   for (const peak of state.peaks) {
@@ -4546,24 +5099,24 @@ function renderPeaks() {
     const swatch = document.createElement("span");
     swatch.className = "swatch";
     swatch.style.setProperty("--swatch", darkPeakColors[peak.id % darkPeakColors.length]);
-    name.append(swatch, rowInput(peak, "label", "\u540D\u524D"));
+    name.append(swatch, rowInput(peak, "label", "name"));
     row.insertCell().append(name);
     const select = document.createElement("select");
     select.dataset.field = "shape";
-    select.setAttribute("aria-label", `${peak.label} \u5F62\u72B6`);
+    select.setAttribute("aria-label", `${peak.label} shape`);
     select.replaceChildren(...shapeOptions.map(([value, label]) => new Option(label, value)));
     select.value = peak.shape;
     row.insertCell().append(select);
-    for (const [key, label, digits] of [["center", "\u4F4D\u7F6E", 5], ["fwhm", "FWHM", 5], ["height", "\u9AD8\u3055", 4]]) {
+    for (const [key, label, digits] of [["center", "Center", 5], ["fwhm", "FWHM", 5], ["height", "Height", 4]]) {
       row.insertCell().append(rowInput(peak, key, label, digits));
     }
     const area = row.insertCell();
     area.className = "number";
     area.textContent = displayNumber(peakArea(peak), 2);
-    area.title = "\u6210\u5206\u306E\u5168\u57DF\u7A4D\u5206";
+    area.title = "Integral of the full component profile";
     const actions = document.createElement("div");
     actions.className = "row-actions";
-    for (const [action, glyph, label] of [["constraint", "sliders", "\u8ABF\u6574"], ["delete", "trash", "\u524A\u9664"]]) {
+    for (const [action, glyph, label] of [["constraint", "sliders", "Constraints"], ["delete", "trash", "Delete"]]) {
       const button = document.createElement("button");
       button.className = "icon-button";
       if (action === "constraint" && (Object.values(peak.fixed || {}).some(Boolean) || Object.keys(peak.bounds || {}).length)) {
@@ -4583,10 +5136,10 @@ function openConstraints(peak) {
   constraintPeakId = peak.id;
   const rows = byId("constraint-rows");
   rows.replaceChildren();
-  byId("peak-dialog-title").textContent = `${peak.label} \u306E\u5236\u7D04`;
+  byId("peak-dialog-title").textContent = `Constraints for ${peak.label}`;
   const grid = document.createElement("div");
   grid.className = "constraint-grid";
-  for (const value of ["\u5909\u6570", "\u5024", "\u56FA\u5B9A", "\u4E0B\u9650", "\u4E0A\u9650"]) {
+  for (const value of ["Parameter", "Value", "Fixed", "Lower", "Upper"]) {
     const heading = document.createElement("span");
     heading.textContent = value;
     grid.append(heading);
@@ -4599,10 +5152,10 @@ function openConstraints(peak) {
     title.textContent = label;
     grid.append(title);
     for (const [column, value, aria] of [
-      ["value", peak[key], "\u5024"],
-      ["fixed", peak.fixed?.[key], "\u56FA\u5B9A"],
-      ["min", peak.bounds?.[key]?.[0], "\u4E0B\u9650"],
-      ["max", peak.bounds?.[key]?.[1], "\u4E0A\u9650"]
+      ["value", peak[key], "Value"],
+      ["fixed", peak.fixed?.[key], "Fixed"],
+      ["min", peak.bounds?.[key]?.[0], "Lower"],
+      ["max", peak.bounds?.[key]?.[1], "Upper"]
     ]) {
       const input = document.createElement("input");
       input.id = `constraint-${key}-${column}`;
@@ -4641,7 +5194,7 @@ function applyConstraints(event) {
     const high = upper.value === "" ? max : upper.valueAsNumber / factor;
     next[key] = value.valueAsNumber / factor;
     if (low > high || next[key] < low || next[key] > high) {
-      value.setCustomValidity("\u4E0B\u9650\u30FB\u4E0A\u9650\u3068\u5024\u306E\u95A2\u4FC2\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      value.setCustomValidity("Enter a value between the lower and upper bounds.");
       value.reportValidity();
       return;
     }
@@ -4667,7 +5220,7 @@ function runFit() {
     if (revision !== state.revision) return;
     invalidate();
     if (error) {
-      notice("\u30D5\u30A3\u30C3\u30C8\u3092\u5B8C\u4E86\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u4F4D\u7F6E\u30FBFWHM\u30FB\u9AD8\u3055\u3068\u5236\u7D04\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      notice("Fit failed. Check the initial centers, FWHMs, heights, and constraints.");
     } else {
       state.result = result;
       state.peaks = result.peaks;
@@ -4698,56 +5251,74 @@ function runFit() {
 }
 function exportData(plotLauncher) {
   try {
-    let add = function(label, values, options) {
-      columns.push({ label, values });
-      if (options) series.push({ label, column: columns.length + 1, ...options });
-    };
     const result = state.result;
-    const { values: background } = state.background;
+    const { energyScale, y, yUnit } = state.spectrum;
+    const originalX = state.original.map((point) => point.x);
+    const x = state.points.map((point) => point.x);
+    const { values: baseline } = state.background;
+    const corrected = sparseAligned(state.section.map((point, i) => point.y - baseline[i]));
+    const background = state.method !== "none" || result ? sparseAligned(baseline) : void 0;
+    const fit = result ? sparseAligned(result.fit) : void 0;
+    const residual = result ? sparseAligned(result.residuals) : void 0;
+    const components = (result?.components ?? []).map((values, i) => ({
+      label: state.peaks[i].label,
+      values: sparseAligned(values),
+      color: darkPeakColors[state.peaks[i].id % darkPeakColors.length]
+    }));
     const columns = [];
-    const series = [{ label: "\u6E2C\u5B9A\u30C7\u30FC\u30BF", column: 1, color: "#253853", mode: "scatter" }];
-    if (state.method !== "none") {
-      add("\u30D0\u30C3\u30AF\u30B0\u30E9\u30A6\u30F3\u30C9", sparseAligned(background), { color: "#6f7890", style: "--" });
-    }
-    add("\u80CC\u666F\u6E1B\u7B97\u5F8C", sparseAligned(state.section.map(({ y }, i) => y - background[i])));
+    if (state.method !== "none") columns.push({ label: "Background", values: background });
+    columns.push({ label: "Background-subtracted intensity", values: corrected });
     if (result) {
-      add("\u5408\u6210\u30D5\u30A3\u30C3\u30C8", sparseAligned(result.fit), { color: "#5441d0" });
-      add("\u6B8B\u5DEE", sparseAligned(result.residuals));
-      result.components.forEach((component, i) => {
-        const peak = state.peaks[i];
-        add(`\u6210\u5206 ${i + 1} ${peak.label}`, sparseAligned(component));
-        if (plotLauncher) {
-          add(`\u80CC\u666F\u4ED8\u304D\u6210\u5206 ${i + 1} ${peak.label}`, sparseAligned(component, background), {
-            color: darkPeakColors[peak.id % darkPeakColors.length]
-          });
-        }
+      columns.push({ label: "Total fit", values: fit }, { label: "Residual", values: residual });
+      components.forEach(({ label, values }, i) => {
+        const prefix = `Peak ${i + 1}`;
+        const name2 = englishExportLabel(label, prefix);
+        columns.push({ label: name2 === prefix ? prefix : `${prefix} - ${name2}`, values });
       });
     }
-    add("\u88DC\u6B63\u524D\u30A8\u30CD\u30EB\u30AE\u30FC (eV)", state.spectrum.x);
-    const csv = spectrumToCsv({ ...state.spectrum, x: state.points.map(({ x }) => x), columns });
-    const stem = (state.spectrum.filename || state.spectrum.name).replace(/\.[^.]+$/, "");
-    const region = state.dataset.regions?.length > 1 ? `-${state.spectrum.name}` : "";
-    const name = (stem + region).replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
-    if (plotLauncher && state.points.length > 2e5) throw new Error("Plot Launcher\u306F20\u4E07\u70B9\u307E\u3067\u8AAD\u307F\u8FBC\u3081\u307E\u3059\u3002CSV\u3067\u4FDD\u5B58\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+    columns.push({ label: `Original ${energyName().toLowerCase()} (eV)`, values: originalX });
+    const stem = englishExportFilename(state.spectrum.filename || state.spectrum.name);
+    const region = state.dataset.regions?.length > 1 ? `-${englishExportFilename(state.spectrum.name, `region-${Number(byId("region").value) + 1}`)}` : "";
+    const name = `${(stem + region).slice(0, 116)}-xps`;
     const payload = plotLauncher ? toPlotLauncherProject({
-      name: `${name}-xps`,
-      csv,
-      xLabel: energyName(),
-      yUnit: state.spectrum.yUnit,
-      series,
-      reverseX: state.spectrum.energyScale !== "kinetic"
-    }) : csv;
+      name,
+      x,
+      y,
+      yUnit,
+      energyScale,
+      corrected,
+      originalX,
+      background,
+      fit,
+      residual,
+      components
+    }) : spectrumToCsv({
+      x,
+      y,
+      yUnit,
+      energyScale,
+      columns,
+      analysis: {
+        version: 1,
+        method: state.method,
+        offset: state.offset,
+        range: state.range,
+        peaks: state.peaks,
+        status: result?.status ?? null,
+        iterations: result?.iterations ?? 0
+      }
+    });
     const link = document.createElement("a");
     const url = URL.createObjectURL(new Blob([payload], { type: plotLauncher ? "application/json" : "text/csv;charset=utf-8" }));
     link.href = url;
-    link.download = `${name}-xps.${plotLauncher ? "plotproject" : "csv"}`;
+    link.download = `${name}.${plotLauncher ? "plotproject" : "csv"}`;
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 3e4);
-    toast(plotLauncher ? "Plot Launcher\u306E\u7DE8\u96C6\u7528\u30D5\u30A1\u30A4\u30EB\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F\u3002" : "\u89E3\u6790\u30C7\u30FC\u30BF\u3092CSV\u3067\u4FDD\u5B58\u3057\u307E\u3057\u305F\u3002");
+    toast(plotLauncher ? "Plot Launcher XPS Fit project exported." : "Spectrum CSV exported.");
   } catch (error) {
-    notice(error.message || "\u30D5\u30A1\u30A4\u30EB\u306E\u66F8\u304D\u51FA\u3057\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
+    notice(error.message || "Could not export the file.");
   }
 }
 function choosePeak(x) {
@@ -4759,7 +5330,7 @@ function choosePeak(x) {
     renderPick();
   } else if (state.pick === "peak") {
     if (x < state.range[0] || x > state.range[1]) {
-      toast("\u89E3\u6790\u7BC4\u56F2\u5185\u306E\u4F4D\u7F6E\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      toast("Pick a position within the analysis range.");
       return;
     }
     invalidate();
@@ -4784,7 +5355,7 @@ async function open(file) {
     const spectrum = await readSpectrumFile(file);
     if (load === fileLoad) loadDataset(spectrum);
   } catch (error) {
-    if (load === fileLoad) notice(error.message || "\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u3051\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
+    if (load === fileLoad) notice(error.message || "Could not open the file.");
   }
 }
 byId("file").addEventListener("change", (event) => {
@@ -4839,7 +5410,7 @@ byId("full-range").addEventListener("click", () => setRange(...rangeOf(state.poi
 byId("fit").addEventListener("click", runFit);
 byId("add-peak").addEventListener("click", () => {
   if (state.peaks.length >= maxPeaks) {
-    toast(`\u30D4\u30FC\u30AF\u6210\u5206\u306F\u6700\u5927${maxPeaks}\u500B\u3067\u3059\u3002`);
+    toast(`Add up to ${maxPeaks} peak components.`);
     return;
   }
   state.pick = state.pick === "peak" ? null : "peak";
@@ -4868,7 +5439,7 @@ byId("peak-rows").addEventListener("change", (event) => {
   const limits = fields.find(([field]) => field === key)?.slice(2);
   if (limits && (!Number.isFinite(value) || value < limits[0] || value > limits[1] || peak.bounds?.[key] && (value < peak.bounds[key][0] || value > peak.bounds[key][1]))) {
     input.value = decimal(peak[key], 8);
-    toast("\u6570\u5024\u304C\u6709\u52B9\u7BC4\u56F2\u307E\u305F\u306F\u8A2D\u5B9A\u6E08\u307F\u306E\u5236\u7D04\u3092\u5916\u308C\u3066\u3044\u307E\u3059\u3002");
+    toast("Enter a value within the allowed range and constraints.");
     return;
   }
   peak[key] = value;
@@ -4906,7 +5477,7 @@ var launcherLink = document.createElement("a");
 launcherLink.href = PLOT_LAUNCHER_URL;
 launcherLink.target = "_blank";
 launcherLink.rel = "noopener noreferrer";
-launcherLink.textContent = "Plot Launcher\u3092\u958B\u304F";
+launcherLink.textContent = "Open Plot Launcher";
 byId("help-dialog").querySelector("ol li:last-child").append(" ", launcherLink);
 for (const button of document.querySelectorAll("[data-close]")) {
   button.addEventListener("click", () => byId(button.dataset.close).close());
@@ -4931,6 +5502,8 @@ document.addEventListener("drop", (event) => {
   event.preventDefault();
   void open(event.dataTransfer.files[0]);
 });
+installNumberInputs();
+installUpdateCheck();
 loadDataset(demoSpectrum());
 runFit();
 /*! Bundled license information:

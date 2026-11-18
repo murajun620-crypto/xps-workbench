@@ -9,7 +9,7 @@ const OFFICE_REL_NAMESPACES = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
   'http://purl.oclc.org/ooxml/officeDocument/relationships',
 ];
-const invalidWorkbook = () => new Error('XLSX形式を確認してください。破損したファイルやパスワード付きのファイルは読み込めません。');
+const invalidWorkbook = () => new Error('The XLSX workbook could not be read. Check that it is valid and unencrypted.');
 
 function child(element, name) {
   if (!element) return undefined;
@@ -29,7 +29,7 @@ function readXmlBytes(entry, limit) {
       if (size > limit) {
         chunks.length = 0;
         stream.pause();
-        reject(new Error('XLSXの展開後のサイズが大きすぎます。測定シートを別のファイルに分けてください。'));
+        reject(new Error('The XLSX workbook is too large when unpacked. Split the measurement sheets into separate files.'));
         return;
       }
       chunks.push(chunk);
@@ -142,7 +142,7 @@ function* worksheetRows(root, sharedStrings) {
     if (row.localName !== 'row') continue;
     rowCount++;
     if (rowCount > MAX_ROWS) {
-      throw new Error('XLSXの1シートに読み込める行数は20万行までです。');
+      throw new Error('XLSX import supports up to 200,000 rows per worksheet.');
     }
     rowNumber = Number(row.getAttribute('r')) || rowNumber + 1;
     const fields = [];
@@ -184,6 +184,6 @@ export async function* xlsxWorksheets(bytes) {
     const worksheet = links.find((link) => link.id === id && link.type === 'worksheet');
     if (!worksheet) continue;
     const rows = worksheetRows(await read(worksheet.path, 'worksheet'), sharedStrings);
-    yield { name: sheet.getAttribute('name') || 'シート', rows };
+    yield { name: sheet.getAttribute('name') || 'Worksheet', rows };
   }
 }

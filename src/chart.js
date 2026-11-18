@@ -241,7 +241,7 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
       ctx.font = sans;
       ctx.textAlign = 'right';
       ctx.fillStyle = palette.tick;
-      ctx.fillText('残差', left - 7, residualY(0));
+      ctx.fillText('Residual', left - 7, residualY(0));
       ctx.font = mono;
       const limit = axisTicks(0, residualMax, 2).at(-1);
       if (limit > 0) {

@@ -1,10 +1,12 @@
 {
   "name": "xps-workbench",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "build:pages": "node build.mjs --pages"
+    "build:pages": "node build.mjs --pages",
+    "test": "node --test"
   },
   "devDependencies": {
     "esbuild": "0.25.12",
