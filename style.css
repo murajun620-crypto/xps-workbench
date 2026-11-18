@@ -114,6 +114,7 @@ select { appearance: none; padding-right: 23px; background-image: url("data:imag
 .fit-status { display: inline-flex; align-items: center; gap: 6px; color: #5a6580; background: #f1f3fa; border-radius: 999px; padding: 4px 8px; font-size: .77rem; font-weight: 650; }
 .fit-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .fit-status.success { color: #137253; background: #e6f7f0; }
+.fit-status.manual { color: var(--accent-dark); background: var(--soft); }
 .fit-status.warning { color: #895114; background: #fff1d9; }
 .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 9px 0; }
 .metrics > div { display: grid; gap: 3px; background: #f6f7fc; border: 1px solid #ebedf6; border-radius: 8px; padding: 7px 9px; }

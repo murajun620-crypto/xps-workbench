@@ -13,7 +13,7 @@ The workspace opens empty, including after a refresh. Select Open data to start 
 3. Select an analysis range and a background method. Linear and iterative Shirley use the range endpoints. If Shirley cannot converge, the app displays a Linear fallback.
 4. Add peaks and set their initial centers, widths, and heights. Drag the circle at a peak's top to adjust center and height. Drag the half-height diamond sideways to adjust FWHM. Fixed values and bounds apply to both handles. The ▲/▼ controls and the Up/Down keys adjust the numeric fields.
 5. Select Add doublet and click the primary line to add a spin-orbit pair, or enable Spin-orbit doublet in an existing peak's Constraints. Si 2p starts with a 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit either value in Constraints. The primary line has the lower binding energy and the higher kinetic energy. Its drag handles adjust the pair while preserving separation, area ratio, and shared FWHM.
-6. Run the fit and inspect the components and residuals. Export CSV to reopen the analysis in Workbench, including doublet settings. Plot Launcher and XPS Fit CSV export the displayed model, including manual peak adjustments, using the XPS Fit preset's axis defaults.
+6. The residual is measured intensity minus the current total model, and updates during manual edits. Run fit optimizes from the current settings. Workbench CSV saves both manual and optimized models with their component curves, residuals, and doublet settings. Plot Launcher and XPS Fit CSV export the displayed model and residuals using the XPS Fit preset's axis defaults.
 
 The version is displayed beside Check for updates. A newer release opens in a new tab so the current analysis stays open.
 

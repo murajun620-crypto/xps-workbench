@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="xps-version" content="1.3.1">
-    <meta name="xps-build" content="22003199b1a1">
+    <meta name="xps-version" content="1.4.0">
+    <meta name="xps-build" content="bae3315efa83">
     <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
@@ -126,6 +126,7 @@ select { appearance: none; padding-right: 23px; background-image: url("data:imag
 .fit-status { display: inline-flex; align-items: center; gap: 6px; color: #5a6580; background: #f1f3fa; border-radius: 999px; padding: 4px 8px; font-size: .77rem; font-weight: 650; }
 .fit-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .fit-status.success { color: #137253; background: #e6f7f0; }
+.fit-status.manual { color: var(--accent-dark); background: var(--soft); }
 .fit-status.warning { color: #895114; background: #fff1d9; }
 .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 9px 0; }
 .metrics > div { display: grid; gap: 3px; background: #f6f7fc; border: 1px solid #ebedf6; border-radius: 8px; padding: 7px 9px; }
@@ -474,9 +475,9 @@ td .number-input {
         <li>Open a CSV, TSV, TXT, XLSX, or VAMAS spectrum. Use Region to choose a measurement or Excel sheet.</li>
         <li>Enter an energy offset, or enter the measured and reference energies of a known peak.</li>
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
-        <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The fit uses the new values as its starting point. Use Constraints to fix values, set limits, or adjust the pseudo-Voigt Lorentzian fraction.</li>
+        <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
-        <li>Export CSV to reopen the analysis in Workbench. For Plot Launcher, export a project or use XPS Fit CSV to load the data with that preset.</li>
+        <li>Export CSV to reopen the model, components, and residuals in Workbench. Plot Launcher and XPS Fit CSV also include the residuals.</li>
       </ol>
       <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>
     </dialog>
@@ -3427,7 +3428,7 @@ var MAX_METADATA_CHARS = 32e3;
 var MAX_PEAKS = 12;
 var methods = /* @__PURE__ */ new Set(["none", "linear", "shirley"]);
 var shapes = /* @__PURE__ */ new Set(["gaussian", "lorentzian", "pseudo-voigt"]);
-var statuses = /* @__PURE__ */ new Set(["converged", "fixed", "stalled", "iteration-limit", "insufficient-points", "restored"]);
+var statuses = /* @__PURE__ */ new Set(["converged", "fixed", "stalled", "iteration-limit", "insufficient-points", "restored", "manual"]);
 var parameters = ["center", "fwhm", "height", "mix"];
 function peakMetadata(peak, index, sanitizeLabel) {
   if (!peak || !shapes.has(peak.shape) || !parameters.every((key) => Number.isFinite(peak[key])) || peak.fwhm <= 0 || peak.height < 0 || peak.mix < 0 || peak.mix > 1) return null;
@@ -4586,14 +4587,7 @@ function estimatePeak(points, background, center) {
     shape: "pseudo-voigt"
   };
 }
-function evaluateFit(points, background, peaks, options) {
-  const lines = peaks.map((peak) => peakLines(peak, options).map((line2) => points.map(({ x }) => lineValue(x, line2))));
-  const components = lines.map(([primary, secondary]) => secondary ? primary.map((value, index) => value + secondary[index]) : primary);
-  const fit = points.map((_, index) => components.reduce(
-    (sum, component) => sum + component[index],
-    background[index]
-  ));
-  const residuals = points.map(({ y }, index) => y - fit[index]);
+function fitStatistics(points, residuals) {
   let squaredError = 0;
   let mean = 0;
   let variation = 0;
@@ -4604,14 +4598,19 @@ function evaluateFit(points, background, peaks, options) {
     squaredError += residuals[index] * residuals[index];
   }
   return {
-    peaks,
-    components,
-    lines,
-    fit,
-    residuals,
     rmse: points.length ? Math.sqrt(squaredError / points.length) : null,
     rSquared: variation > 0 ? 1 - squaredError / variation : null
   };
+}
+function evaluateFit(points, background, peaks, options) {
+  const lines = peaks.map((peak) => peakLines(peak, options).map((line2) => points.map(({ x }) => lineValue(x, line2))));
+  const components = lines.map(([primary, secondary]) => secondary ? primary.map((value, index) => value + secondary[index]) : primary);
+  const fit = points.map((_, index) => components.reduce(
+    (sum, component) => sum + component[index],
+    background[index]
+  ));
+  const residuals = points.map(({ y }, index) => y - fit[index]);
+  return { peaks, components, lines, fit, residuals, ...fitStatistics(points, residuals) };
 }
 function parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale) {
   const defaultBounds = {
@@ -5091,6 +5090,21 @@ function updatePreview() {
     energyScale: state.spectrum.energyScale
   });
 }
+function recordManualModel() {
+  if (!state.peaks.length) return;
+  state.result = { ...state.preview, status: "manual", iterations: 0, converged: false };
+  state.preview = state.result;
+}
+function updateManualModel() {
+  updatePreview();
+  recordManualModel();
+}
+function refreshAnalysis() {
+  const hadResult = Boolean(state.result);
+  invalidate();
+  recalculate();
+  if (hadResult) recordManualModel();
+}
 function savedSection(values) {
   if (!values) return null;
   const section = values.slice(state.start, state.start + state.section.length);
@@ -5116,8 +5130,8 @@ function restoreAnalysis(saved) {
   if (baseline) {
     if (!metadata && state.method !== "none") {
       const linear = analyzeBackground(state.section, "linear").values;
-      const error2 = (values) => values.reduce((sum, value, i) => sum + (value - baseline[i]) ** 2, 0);
-      if (error2(linear) < error2(state.background.values)) state.method = "linear";
+      const error = (values) => values.reduce((sum, value, i) => sum + (value - baseline[i]) ** 2, 0);
+      if (error(linear) < error(state.background.values)) state.method = "linear";
     }
     state.background = { values: baseline, status: "ok", iterations: 0 };
   }
@@ -5137,20 +5151,19 @@ function restoreAnalysis(saved) {
   }
   updatePreview();
   const fit = savedSection(saved.fit);
-  if (!fit || !state.peaks.length) return;
+  if (!state.peaks.length) return;
+  if (!fit) {
+    if (metadata?.status === "manual") recordManualModel();
+    return;
+  }
   const residuals = savedSection(saved.residual) || fit.map((value, i) => state.section[i].y - value);
-  const count = residuals.length;
-  const mean = state.section.reduce((sum, { y }) => sum + y / count, 0);
-  const total = state.section.reduce((sum, { y }) => sum + (y - mean) ** 2, 0);
-  const error = residuals.reduce((sum, value) => sum + value ** 2, 0);
   const status = metadata?.status || "restored";
   const components = metadata ? state.peaks.map((_, i) => curves[i] || state.preview.components[i]) : curves.filter(Boolean);
   state.result = {
     peaks: state.peaks,
     fit,
     residuals,
-    rSquared: total > 0 ? 1 - error / total : null,
-    rmse: Math.sqrt(error / count),
+    ...fitStatistics(state.section, residuals),
     iterations: metadata?.iterations ?? 0,
     status,
     converged: status === "converged" || status === "fixed",
@@ -5296,7 +5309,6 @@ function applyShift(offset) {
     notice("This offset leaves too few points in the analysis range.");
     return;
   }
-  invalidate();
   notice();
   state.offset = offset;
   state.range = [low, high];
@@ -5312,7 +5324,7 @@ function applyShift(offset) {
     } : peak.bounds
   }));
   state.pick = null;
-  recalculate();
+  refreshAnalysis();
   syncControls();
   render();
 }
@@ -5328,10 +5340,14 @@ function setRange(min, max) {
     notice("Include at least three measured points in the analysis range.");
     return;
   }
-  invalidate();
+  if (min === state.range[0] && max === state.range[1]) {
+    notice();
+    syncControls();
+    return;
+  }
   state.range = [min, max];
   notice();
-  recalculate();
+  refreshAnalysis();
   syncControls();
   render();
 }
@@ -5420,9 +5436,10 @@ function renderChart({ updateLegend = true } = {}) {
     { primary: true, marker: true, order: 4 }
   );
   if (state.peaks.length) {
+    const label = state.result?.status === "manual" ? "Manual model" : state.result ? "Total fit" : "Initial model";
     add(
       "total",
-      state.result ? "Total fit" : "Initial model",
+      label,
       "#a995ff",
       sparseAligned(fit.map((y, i) => corrected ? y - background[i] : y)),
       { width: 2.4, order: 3 }
@@ -5445,8 +5462,7 @@ function renderChart({ updateLegend = true } = {}) {
       });
     });
   });
-  const previousFit = peakDrag?.revision === state.revision ? peakDrag.result : null;
-  const residualExists = Boolean(state.result || previousFit) && state.peaks.length > 0;
+  const residualExists = state.peaks.length > 0;
   if (residualExists) {
     add("residual", "Residual", "#9cb3ff", [], { residualOnly: true });
   }
@@ -5525,10 +5541,13 @@ function renderFit() {
     "stalled": "Optimization stalled",
     "iteration-limit": "Iteration limit reached",
     "insufficient-points": "Too few points for the free parameters",
-    restored: "Restored fit"
+    restored: "Restored fit",
+    manual: "Manual model"
   };
-  status.classList.toggle("success", !!result?.converged);
-  status.classList.toggle("warning", !!result && !result.converged && result.status !== "restored");
+  const manual = result?.status === "manual";
+  status.classList.toggle("success", !state.fitting && !!result?.converged);
+  status.classList.toggle("manual", !state.fitting && manual);
+  status.classList.toggle("warning", !state.fitting && !!result && !manual && !result.converged && result.status !== "restored");
   status.textContent = state.fitting ? "Fitting\u2026" : result ? labels[result.status] : "Fit not run";
   byId("r-squared").value = Number.isFinite(result?.rSquared) ? result.rSquared.toFixed(5) : "\u2014";
   byId("rmse").value = displayNumber(result?.rmse, 3);
@@ -5719,14 +5738,16 @@ function applyConstraints(event) {
   }
   invalidate();
   state.peaks = state.peaks.map((item) => item.id === peak.id ? next : item);
-  updatePreview();
+  updateManualModel();
   byId("peak-dialog").close();
   render();
 }
 function runFit() {
   if (state.fitting || !state.peaks.length) return;
   notice();
+  const previous = state.result;
   invalidate();
+  state.result = previous;
   state.fitting = true;
   const revision = state.revision;
   const args = [state.section, state.background.values, state.peaks, { energyScale: state.spectrum.energyScale }];
@@ -5736,6 +5757,7 @@ function runFit() {
     if (revision !== state.revision) return;
     invalidate();
     if (error) {
+      state.result = previous;
       notice("Fit failed. Check the initial centers, FWHMs, heights, and constraints.");
     } else {
       state.result = result;
@@ -5755,7 +5777,7 @@ function runFit() {
     }, 0));
   }
   try {
-    const inlineWorker = true ? '// xps-source:src/xps.js\nvar LOG_TWO = Math.log(2);\nvar GAUSSIAN_AREA = Math.sqrt(Math.PI / LOG_TWO) / 2;\nvar LORENTZIAN_AREA = Math.PI / 2;\nvar DEFAULT_MIX = 0.35;\nvar PARAMETERS = ["center", "fwhm", "height", "mix"];\nvar PRIMARY_LINE = { offset: 0, weight: 1 };\nvar SINGLE_LINE = [PRIMARY_LINE];\nfunction clamp(value, min, max) {\n  return Math.min(Math.max(value, min), max);\n}\nfunction validateSpectrum(points) {\n  if (!points.length || !points.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))) {\n    throw new RangeError("A spectrum must contain finite energies and intensities.");\n  }\n  if (!Number.isFinite(points.at(-1).x - points[0].x)) throw new RangeError("The spectrum energy span is too large.");\n  const ascending = points[0].x < points.at(-1).x;\n  for (let index = 1; index < points.length; index += 1) {\n    const step = points[index].x - points[index - 1].x;\n    if (!Number.isFinite(step) || (ascending ? step <= 0 : step >= 0)) {\n      throw new RangeError("Spectrum energies must be distinct and sorted.");\n    }\n  }\n  return ascending;\n}\nfunction fraction(peak) {\n  if (peak.shape === "gaussian") return 0;\n  if (peak.shape === "lorentzian") return 1;\n  return peak.mix ?? DEFAULT_MIX;\n}\nfunction lineValue(x, peak) {\n  const mix = fraction(peak);\n  const distance = 2 * (x - peak.center) / peak.fwhm;\n  const square = distance * distance;\n  return peak.height * ((1 - mix) * Math.exp(-LOG_TWO * square) + mix / (1 + square));\n}\nfunction doubletSpec(peak) {\n  if (peak.doublet == null) return null;\n  const { separation, ratio } = peak.doublet;\n  if (!Number.isFinite(separation) || separation <= 0 || !Number.isFinite(ratio) || ratio <= 0 || !Number.isFinite(1 / ratio)) {\n    throw new RangeError("Doublet separation and primary-to-secondary area ratio must be finite and positive.");\n  }\n  return peak.doublet;\n}\nfunction doubletOffset(separation, energyScale) {\n  if (energyScale === "binding") return separation;\n  if (energyScale === "kinetic") return -separation;\n  throw new RangeError(`Unknown energy scale: ${energyScale}`);\n}\nfunction peakLines(peak, { energyScale = "binding" } = {}) {\n  const doublet = doubletSpec(peak);\n  if (!doublet) return [peak];\n  const { doublet: _, ...primary } = peak;\n  const center = primary.center + doubletOffset(doublet.separation, energyScale);\n  if (!Number.isFinite(center) || center === primary.center) {\n    throw new RangeError("The doublet must have two distinct, finite peak centers.");\n  }\n  const height = primary.height / doublet.ratio;\n  if (!Number.isFinite(height)) throw new RangeError("The doublet line heights must be finite.");\n  return [primary, { ...primary, center, height }];\n}\nfunction evaluateFit(points, background, peaks, options) {\n  const lines = peaks.map((peak) => peakLines(peak, options).map((line) => points.map(({ x }) => lineValue(x, line))));\n  const components = lines.map(([primary, secondary]) => secondary ? primary.map((value, index) => value + secondary[index]) : primary);\n  const fit = points.map((_, index) => components.reduce(\n    (sum, component) => sum + component[index],\n    background[index]\n  ));\n  const residuals = points.map(({ y }, index) => y - fit[index]);\n  let squaredError = 0;\n  let mean = 0;\n  let variation = 0;\n  for (let index = 0; index < points.length; index += 1) {\n    const delta = points[index].y - mean;\n    mean += delta / (index + 1);\n    variation += delta * (points[index].y - mean);\n    squaredError += residuals[index] * residuals[index];\n  }\n  return {\n    peaks,\n    components,\n    lines,\n    fit,\n    residuals,\n    rmse: points.length ? Math.sqrt(squaredError / points.length) : null,\n    rSquared: variation > 0 ? 1 - squaredError / variation : null\n  };\n}\nfunction parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale) {\n  const defaultBounds = {\n    center: [minimum, minimum + span],\n    fwhm: [Math.max(sampleSpacing * 0.1, span * 1e-8), Infinity],\n    height: [0, Infinity],\n    mix: [0, 1]\n  };\n  const physicalBounds = {\n    center: [-Infinity, Infinity],\n    fwhm: [span * 1e-12, Infinity],\n    height: [0, Infinity],\n    mix: [0, 1]\n  };\n  const scales = { center: span, fwhm: span, mix: 1 };\n  const variables = [];\n  const models = peaks.map((peak, peakIndex) => {\n    const doublet = doubletSpec(peak);\n    const primaryWeight = doublet ? Math.min(1, doublet.ratio) : 1;\n    const model = { indexes: [], lines: SINGLE_LINE, heightScale: intensityScale * primaryWeight };\n    if (doublet) {\n      const offset = doubletOffset(doublet.separation, energyScale) / span;\n      if (!Number.isFinite(offset) || offset === 0) {\n        throw new RangeError(`Peak ${peakIndex + 1} has an unresolvable doublet separation.`);\n      }\n      model.lines = [{ offset: 0, weight: primaryWeight }, { offset, weight: primaryWeight / doublet.ratio }];\n    }\n    for (const [parameterIndex, key] of PARAMETERS.entries()) {\n      const offset = key === "center" ? minimum : 0;\n      const scale = key === "height" ? model.heightScale : scales[key];\n      const value = key === "mix" ? fraction(peak) : peak[key];\n      const pureShape = key === "mix" && (peak.shape === "gaussian" || peak.shape === "lorentzian");\n      const locked = pureShape || Boolean(peak.fixed?.[key]);\n      const bounds = pureShape ? physicalBounds[key] : peak.bounds?.[key];\n      const [minimumValue, maximumValue] = physicalBounds[key];\n      const [defaultLower, defaultUpper] = locked ? physicalBounds[key] : defaultBounds[key];\n      const lower = Math.max(bounds?.[0] ?? defaultLower, minimumValue);\n      const upper = Math.min(bounds?.[1] ?? defaultUpper, maximumValue);\n      const normalized = (clamp(value, lower, upper) - offset) / scale;\n      if (!Number.isFinite(value) || !Number.isFinite(normalized) || lower > upper || locked && (value < lower || value > upper)) {\n        throw new RangeError(`Peak ${peakIndex + 1} has an invalid ${key} or conflicting bounds.`);\n      }\n      model[key] = normalized;\n      model.indexes[parameterIndex] = -1;\n      if (!locked && lower < upper) {\n        model.indexes[parameterIndex] = variables.length;\n        variables.push({ peakIndex, key, lower: (lower - offset) / scale, upper: (upper - offset) / scale });\n      }\n    }\n    return model;\n  });\n  return { models, variables };\n}\nfunction fitSystem(energies, net, models, variableCount, derivatives) {\n  const jacobianRow = derivatives ? new Float64Array(variableCount) : null;\n  const hessian = derivatives ? Array.from({ length: variableCount }, () => new Float64Array(variableCount)) : null;\n  const gradient = derivatives ? new Float64Array(variableCount) : null;\n  let cost = 0;\n  for (let index = 0; index < energies.length; index += 1) {\n    let value = 0;\n    for (const model of models) {\n      const position = energies[index] - model.center;\n      const gaussianFraction = 1 - model.mix;\n      let shape = 0;\n      let centerSlope = 0;\n      let widthSlope = 0;\n      let mixSlope = 0;\n      for (const { offset, weight } of model.lines) {\n        const distance = 2 * (position - offset) / model.fwhm;\n        const square = distance * distance;\n        if (!Number.isFinite(square)) continue;\n        const gaussian = Math.exp(-LOG_TWO * square);\n        const lorentzian = 1 / (1 + square);\n        shape += weight * (gaussianFraction * gaussian + model.mix * lorentzian);\n        if (derivatives) {\n          const slope = -2 * distance * (gaussianFraction * LOG_TWO * gaussian + model.mix * lorentzian * lorentzian);\n          centerSlope += weight * slope;\n          widthSlope += weight * distance * slope;\n          mixSlope += weight * (lorentzian - gaussian);\n        }\n      }\n      value += model.height * shape;\n      if (derivatives) {\n        const [center, fwhm, height, mix] = model.indexes;\n        if (center >= 0) jacobianRow[center] = -2 * model.height * centerSlope / model.fwhm;\n        if (fwhm >= 0) jacobianRow[fwhm] = -model.height * widthSlope / model.fwhm;\n        if (height >= 0) jacobianRow[height] = shape;\n        if (mix >= 0) jacobianRow[mix] = model.height * mixSlope;\n      }\n    }\n    const residual = net[index] - value;\n    cost += residual * residual;\n    if (derivatives) {\n      for (let row = 0; row < variableCount; row += 1) {\n        const derivative = jacobianRow[row];\n        gradient[row] += derivative * residual;\n        for (let column = 0; column <= row; column += 1) {\n          hessian[row][column] += derivative * jacobianRow[column];\n        }\n      }\n    }\n  }\n  return { cost, hessian, gradient };\n}\nfunction solveDamped(hessian, gradient, free, damping) {\n  const size = free.length;\n  const matrix = Array.from({ length: size }, () => new Float64Array(size));\n  const rhs = new Float64Array(size);\n  const diagonal = free.map((index) => Math.sqrt(Math.max(hessian[index][index], 1e-20)));\n  for (let row = 0; row < size; row += 1) {\n    const originalRow = free[row];\n    let value = gradient[originalRow] / diagonal[row];\n    for (let column = 0; column <= row; column += 1) {\n      const originalColumn = free[column];\n      let element = hessian[originalRow][originalColumn] / (diagonal[row] * diagonal[column]);\n      if (row === column) element += damping;\n      for (let previous = 0; previous < column; previous += 1) {\n        element -= matrix[row][previous] * matrix[column][previous];\n      }\n      if (row === column) {\n        if (!(element > 0) || !Number.isFinite(element)) return null;\n        matrix[row][column] = Math.sqrt(element);\n      } else {\n        matrix[row][column] = element / matrix[column][column];\n        value -= matrix[row][column] * rhs[column];\n      }\n    }\n    rhs[row] = value / matrix[row][row];\n  }\n  const step = new Float64Array(gradient.length);\n  for (let row = size - 1; row >= 0; row -= 1) {\n    let value = rhs[row];\n    for (let column = row + 1; column < size; column += 1) {\n      value -= matrix[column][row] * rhs[column];\n    }\n    rhs[row] = value / matrix[row][row];\n    step[free[row]] = rhs[row] / diagonal[row];\n  }\n  return step;\n}\nfunction fitPeaks(points, background, peaks, { maxIterations = 180, energyScale = "binding" } = {}) {\n  validateSpectrum(points);\n  if (points.length < 2 || background.length !== points.length || !background.every(Number.isFinite)) {\n    throw new RangeError("Fit requires at least two points and one finite background value per point.");\n  }\n  if (peaks.length === 0) throw new RangeError("Fit requires at least one peak.");\n  if (!Number.isInteger(maxIterations) || maxIterations < 1) throw new RangeError("Invalid fit iteration limit.");\n  const minimum = Math.min(points[0].x, points.at(-1).x);\n  const span = Math.abs(points[0].x - points.at(-1).x);\n  const energies = Float64Array.from(points, ({ x }) => (x - minimum) / span);\n  const net = Float64Array.from(points, ({ y }, index) => y - background[index]);\n  let intensityScale = 0;\n  for (const value of net) intensityScale = Math.max(intensityScale, Math.abs(value));\n  if (intensityScale === 0) {\n    for (const peak of peaks) {\n      const height = Math.abs(peak.height);\n      const doublet = doubletSpec(peak);\n      intensityScale = Math.max(intensityScale, height, doublet ? height / doublet.ratio : 0);\n    }\n  }\n  if (intensityScale === 0) intensityScale = 1;\n  if (!Number.isFinite(intensityScale)) throw new RangeError("Fit requires finite intensities and peak parameters.");\n  for (let index = 0; index < net.length; index += 1) net[index] /= intensityScale;\n  let sampleSpacing = span;\n  for (let index = 1; index < points.length; index += 1) {\n    sampleSpacing = Math.min(sampleSpacing, Math.abs(points[index].x - points[index - 1].x));\n  }\n  const parameterization = parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale);\n  let models = parameterization.models;\n  const variables = parameterization.variables;\n  const count = variables.length;\n  let status = count === 0 ? "fixed" : count > points.length ? "insufficient-points" : "iteration-limit";\n  let iterations = 0;\n  let damping = 1e-3;\n  let system;\n  while (status === "iteration-limit" && iterations < maxIterations) {\n    system ??= fitSystem(energies, net, models, count, true);\n    const { cost, hessian, gradient } = system;\n    const free = [];\n    let projectedGradient = 0;\n    for (let index = 0; index < count; index += 1) {\n      const { peakIndex, key, lower, upper } = variables[index];\n      const value = models[peakIndex][key];\n      const slope = gradient[index];\n      if (value <= lower && slope <= 0 || value >= upper && slope >= 0) continue;\n      free.push(index);\n      projectedGradient = Math.max(projectedGradient, Math.abs(slope) / Math.sqrt(Math.max(hessian[index][index], 1e-20)));\n    }\n    if (cost <= 1e-24 * points.length || projectedGradient <= 1e-8 * Math.max(1, Math.sqrt(cost))) {\n      status = "converged";\n      break;\n    }\n    iterations += 1;\n    const step = solveDamped(hessian, gradient, free, damping);\n    if (step) {\n      const candidate = models.map((model) => ({ ...model }));\n      let stepSize = 0;\n      for (let index = 0; index < count; index += 1) {\n        const { peakIndex, key, lower, upper } = variables[index];\n        const value = models[peakIndex][key];\n        const next = clamp(value + step[index], lower, upper);\n        candidate[peakIndex][key] = next;\n        stepSize = Math.max(stepSize, Math.abs(next - value) / Math.max(1, Math.abs(value)));\n      }\n      const trialCost = fitSystem(energies, net, candidate, count, false).cost;\n      if (trialCost < cost) {\n        models = candidate;\n        system = null;\n        damping = Math.max(1e-10, damping / 3);\n        if (damping < 1 && stepSize < 1e-6 && cost - trialCost < 1e-9 * cost) status = "converged";\n        continue;\n      }\n    }\n    damping *= 6;\n    if (damping > 1e12) status = "stalled";\n  }\n  const fittedPeaks = peaks.map((peak, index) => {\n    const model = models[index];\n    return {\n      ...peak,\n      center: peak.fixed?.center ? peak.center : minimum + span * model.center,\n      fwhm: peak.fixed?.fwhm ? peak.fwhm : span * model.fwhm,\n      height: peak.fixed?.height ? peak.height : model.heightScale * model.height,\n      mix: model.mix\n    };\n  });\n  return {\n    ...evaluateFit(points, background, fittedPeaks, { energyScale }),\n    iterations,\n    converged: status === "converged" || status === "fixed",\n    status\n  };\n}\n\n// xps-source:src/fit-worker.js\nself.onmessage = ({ data }) => {\n  try {\n    self.postMessage({ result: fitPeaks(...data) });\n  } catch (error) {\n    self.postMessage({ error: error.message });\n  }\n};\n' : null;
+    const inlineWorker = true ? '// xps-source:src/xps.js\nvar LOG_TWO = Math.log(2);\nvar GAUSSIAN_AREA = Math.sqrt(Math.PI / LOG_TWO) / 2;\nvar LORENTZIAN_AREA = Math.PI / 2;\nvar DEFAULT_MIX = 0.35;\nvar PARAMETERS = ["center", "fwhm", "height", "mix"];\nvar PRIMARY_LINE = { offset: 0, weight: 1 };\nvar SINGLE_LINE = [PRIMARY_LINE];\nfunction clamp(value, min, max) {\n  return Math.min(Math.max(value, min), max);\n}\nfunction validateSpectrum(points) {\n  if (!points.length || !points.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))) {\n    throw new RangeError("A spectrum must contain finite energies and intensities.");\n  }\n  if (!Number.isFinite(points.at(-1).x - points[0].x)) throw new RangeError("The spectrum energy span is too large.");\n  const ascending = points[0].x < points.at(-1).x;\n  for (let index = 1; index < points.length; index += 1) {\n    const step = points[index].x - points[index - 1].x;\n    if (!Number.isFinite(step) || (ascending ? step <= 0 : step >= 0)) {\n      throw new RangeError("Spectrum energies must be distinct and sorted.");\n    }\n  }\n  return ascending;\n}\nfunction fraction(peak) {\n  if (peak.shape === "gaussian") return 0;\n  if (peak.shape === "lorentzian") return 1;\n  return peak.mix ?? DEFAULT_MIX;\n}\nfunction lineValue(x, peak) {\n  const mix = fraction(peak);\n  const distance = 2 * (x - peak.center) / peak.fwhm;\n  const square = distance * distance;\n  return peak.height * ((1 - mix) * Math.exp(-LOG_TWO * square) + mix / (1 + square));\n}\nfunction doubletSpec(peak) {\n  if (peak.doublet == null) return null;\n  const { separation, ratio } = peak.doublet;\n  if (!Number.isFinite(separation) || separation <= 0 || !Number.isFinite(ratio) || ratio <= 0 || !Number.isFinite(1 / ratio)) {\n    throw new RangeError("Doublet separation and primary-to-secondary area ratio must be finite and positive.");\n  }\n  return peak.doublet;\n}\nfunction doubletOffset(separation, energyScale) {\n  if (energyScale === "binding") return separation;\n  if (energyScale === "kinetic") return -separation;\n  throw new RangeError(`Unknown energy scale: ${energyScale}`);\n}\nfunction peakLines(peak, { energyScale = "binding" } = {}) {\n  const doublet = doubletSpec(peak);\n  if (!doublet) return [peak];\n  const { doublet: _, ...primary } = peak;\n  const center = primary.center + doubletOffset(doublet.separation, energyScale);\n  if (!Number.isFinite(center) || center === primary.center) {\n    throw new RangeError("The doublet must have two distinct, finite peak centers.");\n  }\n  const height = primary.height / doublet.ratio;\n  if (!Number.isFinite(height)) throw new RangeError("The doublet line heights must be finite.");\n  return [primary, { ...primary, center, height }];\n}\nfunction fitStatistics(points, residuals) {\n  let squaredError = 0;\n  let mean = 0;\n  let variation = 0;\n  for (let index = 0; index < points.length; index += 1) {\n    const delta = points[index].y - mean;\n    mean += delta / (index + 1);\n    variation += delta * (points[index].y - mean);\n    squaredError += residuals[index] * residuals[index];\n  }\n  return {\n    rmse: points.length ? Math.sqrt(squaredError / points.length) : null,\n    rSquared: variation > 0 ? 1 - squaredError / variation : null\n  };\n}\nfunction evaluateFit(points, background, peaks, options) {\n  const lines = peaks.map((peak) => peakLines(peak, options).map((line) => points.map(({ x }) => lineValue(x, line))));\n  const components = lines.map(([primary, secondary]) => secondary ? primary.map((value, index) => value + secondary[index]) : primary);\n  const fit = points.map((_, index) => components.reduce(\n    (sum, component) => sum + component[index],\n    background[index]\n  ));\n  const residuals = points.map(({ y }, index) => y - fit[index]);\n  return { peaks, components, lines, fit, residuals, ...fitStatistics(points, residuals) };\n}\nfunction parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale) {\n  const defaultBounds = {\n    center: [minimum, minimum + span],\n    fwhm: [Math.max(sampleSpacing * 0.1, span * 1e-8), Infinity],\n    height: [0, Infinity],\n    mix: [0, 1]\n  };\n  const physicalBounds = {\n    center: [-Infinity, Infinity],\n    fwhm: [span * 1e-12, Infinity],\n    height: [0, Infinity],\n    mix: [0, 1]\n  };\n  const scales = { center: span, fwhm: span, mix: 1 };\n  const variables = [];\n  const models = peaks.map((peak, peakIndex) => {\n    const doublet = doubletSpec(peak);\n    const primaryWeight = doublet ? Math.min(1, doublet.ratio) : 1;\n    const model = { indexes: [], lines: SINGLE_LINE, heightScale: intensityScale * primaryWeight };\n    if (doublet) {\n      const offset = doubletOffset(doublet.separation, energyScale) / span;\n      if (!Number.isFinite(offset) || offset === 0) {\n        throw new RangeError(`Peak ${peakIndex + 1} has an unresolvable doublet separation.`);\n      }\n      model.lines = [{ offset: 0, weight: primaryWeight }, { offset, weight: primaryWeight / doublet.ratio }];\n    }\n    for (const [parameterIndex, key] of PARAMETERS.entries()) {\n      const offset = key === "center" ? minimum : 0;\n      const scale = key === "height" ? model.heightScale : scales[key];\n      const value = key === "mix" ? fraction(peak) : peak[key];\n      const pureShape = key === "mix" && (peak.shape === "gaussian" || peak.shape === "lorentzian");\n      const locked = pureShape || Boolean(peak.fixed?.[key]);\n      const bounds = pureShape ? physicalBounds[key] : peak.bounds?.[key];\n      const [minimumValue, maximumValue] = physicalBounds[key];\n      const [defaultLower, defaultUpper] = locked ? physicalBounds[key] : defaultBounds[key];\n      const lower = Math.max(bounds?.[0] ?? defaultLower, minimumValue);\n      const upper = Math.min(bounds?.[1] ?? defaultUpper, maximumValue);\n      const normalized = (clamp(value, lower, upper) - offset) / scale;\n      if (!Number.isFinite(value) || !Number.isFinite(normalized) || lower > upper || locked && (value < lower || value > upper)) {\n        throw new RangeError(`Peak ${peakIndex + 1} has an invalid ${key} or conflicting bounds.`);\n      }\n      model[key] = normalized;\n      model.indexes[parameterIndex] = -1;\n      if (!locked && lower < upper) {\n        model.indexes[parameterIndex] = variables.length;\n        variables.push({ peakIndex, key, lower: (lower - offset) / scale, upper: (upper - offset) / scale });\n      }\n    }\n    return model;\n  });\n  return { models, variables };\n}\nfunction fitSystem(energies, net, models, variableCount, derivatives) {\n  const jacobianRow = derivatives ? new Float64Array(variableCount) : null;\n  const hessian = derivatives ? Array.from({ length: variableCount }, () => new Float64Array(variableCount)) : null;\n  const gradient = derivatives ? new Float64Array(variableCount) : null;\n  let cost = 0;\n  for (let index = 0; index < energies.length; index += 1) {\n    let value = 0;\n    for (const model of models) {\n      const position = energies[index] - model.center;\n      const gaussianFraction = 1 - model.mix;\n      let shape = 0;\n      let centerSlope = 0;\n      let widthSlope = 0;\n      let mixSlope = 0;\n      for (const { offset, weight } of model.lines) {\n        const distance = 2 * (position - offset) / model.fwhm;\n        const square = distance * distance;\n        if (!Number.isFinite(square)) continue;\n        const gaussian = Math.exp(-LOG_TWO * square);\n        const lorentzian = 1 / (1 + square);\n        shape += weight * (gaussianFraction * gaussian + model.mix * lorentzian);\n        if (derivatives) {\n          const slope = -2 * distance * (gaussianFraction * LOG_TWO * gaussian + model.mix * lorentzian * lorentzian);\n          centerSlope += weight * slope;\n          widthSlope += weight * distance * slope;\n          mixSlope += weight * (lorentzian - gaussian);\n        }\n      }\n      value += model.height * shape;\n      if (derivatives) {\n        const [center, fwhm, height, mix] = model.indexes;\n        if (center >= 0) jacobianRow[center] = -2 * model.height * centerSlope / model.fwhm;\n        if (fwhm >= 0) jacobianRow[fwhm] = -model.height * widthSlope / model.fwhm;\n        if (height >= 0) jacobianRow[height] = shape;\n        if (mix >= 0) jacobianRow[mix] = model.height * mixSlope;\n      }\n    }\n    const residual = net[index] - value;\n    cost += residual * residual;\n    if (derivatives) {\n      for (let row = 0; row < variableCount; row += 1) {\n        const derivative = jacobianRow[row];\n        gradient[row] += derivative * residual;\n        for (let column = 0; column <= row; column += 1) {\n          hessian[row][column] += derivative * jacobianRow[column];\n        }\n      }\n    }\n  }\n  return { cost, hessian, gradient };\n}\nfunction solveDamped(hessian, gradient, free, damping) {\n  const size = free.length;\n  const matrix = Array.from({ length: size }, () => new Float64Array(size));\n  const rhs = new Float64Array(size);\n  const diagonal = free.map((index) => Math.sqrt(Math.max(hessian[index][index], 1e-20)));\n  for (let row = 0; row < size; row += 1) {\n    const originalRow = free[row];\n    let value = gradient[originalRow] / diagonal[row];\n    for (let column = 0; column <= row; column += 1) {\n      const originalColumn = free[column];\n      let element = hessian[originalRow][originalColumn] / (diagonal[row] * diagonal[column]);\n      if (row === column) element += damping;\n      for (let previous = 0; previous < column; previous += 1) {\n        element -= matrix[row][previous] * matrix[column][previous];\n      }\n      if (row === column) {\n        if (!(element > 0) || !Number.isFinite(element)) return null;\n        matrix[row][column] = Math.sqrt(element);\n      } else {\n        matrix[row][column] = element / matrix[column][column];\n        value -= matrix[row][column] * rhs[column];\n      }\n    }\n    rhs[row] = value / matrix[row][row];\n  }\n  const step = new Float64Array(gradient.length);\n  for (let row = size - 1; row >= 0; row -= 1) {\n    let value = rhs[row];\n    for (let column = row + 1; column < size; column += 1) {\n      value -= matrix[column][row] * rhs[column];\n    }\n    rhs[row] = value / matrix[row][row];\n    step[free[row]] = rhs[row] / diagonal[row];\n  }\n  return step;\n}\nfunction fitPeaks(points, background, peaks, { maxIterations = 180, energyScale = "binding" } = {}) {\n  validateSpectrum(points);\n  if (points.length < 2 || background.length !== points.length || !background.every(Number.isFinite)) {\n    throw new RangeError("Fit requires at least two points and one finite background value per point.");\n  }\n  if (peaks.length === 0) throw new RangeError("Fit requires at least one peak.");\n  if (!Number.isInteger(maxIterations) || maxIterations < 1) throw new RangeError("Invalid fit iteration limit.");\n  const minimum = Math.min(points[0].x, points.at(-1).x);\n  const span = Math.abs(points[0].x - points.at(-1).x);\n  const energies = Float64Array.from(points, ({ x }) => (x - minimum) / span);\n  const net = Float64Array.from(points, ({ y }, index) => y - background[index]);\n  let intensityScale = 0;\n  for (const value of net) intensityScale = Math.max(intensityScale, Math.abs(value));\n  if (intensityScale === 0) {\n    for (const peak of peaks) {\n      const height = Math.abs(peak.height);\n      const doublet = doubletSpec(peak);\n      intensityScale = Math.max(intensityScale, height, doublet ? height / doublet.ratio : 0);\n    }\n  }\n  if (intensityScale === 0) intensityScale = 1;\n  if (!Number.isFinite(intensityScale)) throw new RangeError("Fit requires finite intensities and peak parameters.");\n  for (let index = 0; index < net.length; index += 1) net[index] /= intensityScale;\n  let sampleSpacing = span;\n  for (let index = 1; index < points.length; index += 1) {\n    sampleSpacing = Math.min(sampleSpacing, Math.abs(points[index].x - points[index - 1].x));\n  }\n  const parameterization = parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale);\n  let models = parameterization.models;\n  const variables = parameterization.variables;\n  const count = variables.length;\n  let status = count === 0 ? "fixed" : count > points.length ? "insufficient-points" : "iteration-limit";\n  let iterations = 0;\n  let damping = 1e-3;\n  let system;\n  while (status === "iteration-limit" && iterations < maxIterations) {\n    system ??= fitSystem(energies, net, models, count, true);\n    const { cost, hessian, gradient } = system;\n    const free = [];\n    let projectedGradient = 0;\n    for (let index = 0; index < count; index += 1) {\n      const { peakIndex, key, lower, upper } = variables[index];\n      const value = models[peakIndex][key];\n      const slope = gradient[index];\n      if (value <= lower && slope <= 0 || value >= upper && slope >= 0) continue;\n      free.push(index);\n      projectedGradient = Math.max(projectedGradient, Math.abs(slope) / Math.sqrt(Math.max(hessian[index][index], 1e-20)));\n    }\n    if (cost <= 1e-24 * points.length || projectedGradient <= 1e-8 * Math.max(1, Math.sqrt(cost))) {\n      status = "converged";\n      break;\n    }\n    iterations += 1;\n    const step = solveDamped(hessian, gradient, free, damping);\n    if (step) {\n      const candidate = models.map((model) => ({ ...model }));\n      let stepSize = 0;\n      for (let index = 0; index < count; index += 1) {\n        const { peakIndex, key, lower, upper } = variables[index];\n        const value = models[peakIndex][key];\n        const next = clamp(value + step[index], lower, upper);\n        candidate[peakIndex][key] = next;\n        stepSize = Math.max(stepSize, Math.abs(next - value) / Math.max(1, Math.abs(value)));\n      }\n      const trialCost = fitSystem(energies, net, candidate, count, false).cost;\n      if (trialCost < cost) {\n        models = candidate;\n        system = null;\n        damping = Math.max(1e-10, damping / 3);\n        if (damping < 1 && stepSize < 1e-6 && cost - trialCost < 1e-9 * cost) status = "converged";\n        continue;\n      }\n    }\n    damping *= 6;\n    if (damping > 1e12) status = "stalled";\n  }\n  const fittedPeaks = peaks.map((peak, index) => {\n    const model = models[index];\n    return {\n      ...peak,\n      center: peak.fixed?.center ? peak.center : minimum + span * model.center,\n      fwhm: peak.fixed?.fwhm ? peak.fwhm : span * model.fwhm,\n      height: peak.fixed?.height ? peak.height : model.heightScale * model.height,\n      mix: model.mix\n    };\n  });\n  return {\n    ...evaluateFit(points, background, fittedPeaks, { energyScale }),\n    iterations,\n    converged: status === "converged" || status === "fixed",\n    status\n  };\n}\n\n// xps-source:src/fit-worker.js\nself.onmessage = ({ data }) => {\n  try {\n    self.postMessage({ result: fitPeaks(...data) });\n  } catch (error) {\n    self.postMessage({ error: error.message });\n  }\n};\n' : null;
     if (inlineWorker) workerObjectUrl = URL.createObjectURL(new Blob([inlineWorker], { type: "text/javascript" }));
     fitWorker = new Worker(workerObjectUrl || new URL("./fit-worker.js", import.meta.url), { type: "module" });
     fitWorker.onmessage = ({ data }) => done(data.result, data.error);
@@ -5907,7 +5929,7 @@ function choosePeak(x) {
     }
     state.peaks.push(buildPeak(peak));
     state.pick = null;
-    updatePreview();
+    updateManualModel();
     render();
   }
 }
@@ -5934,6 +5956,7 @@ function previewDraggedPeak(drag, peak) {
   const fit = drag.preview.fit.map((value, i) => value - previous[i] + component[i]);
   const components = drag.preview.components.slice();
   const lines = drag.preview.lines.slice();
+  const residuals = fit.map((value, i) => state.section[i].y - value);
   components[drag.index] = component;
   lines[drag.index] = updated.lines[0];
   state.preview = {
@@ -5941,7 +5964,8 @@ function previewDraggedPeak(drag, peak) {
     fit,
     components,
     lines,
-    residuals: fit.map((value, i) => state.section[i].y - value)
+    residuals,
+    ...fitStatistics(state.section, residuals)
   };
 }
 function dragPeakHandle(handle, point, phase) {
@@ -5984,6 +6008,7 @@ function dragPeakHandle(handle, point, phase) {
   const moved = atStart ? drag.peak : movePeakHandle(drag.peak, handle.kind, { ...point, side: handle.side }, state.range, backgroundAt);
   const current = state.peaks[drag.index];
   const changed = moved.center !== current.center || moved.height !== current.height || moved.fwhm !== current.fwhm;
+  const previousStatus = state.result?.status;
   const firstChange = changed && !drag.changed;
   if (changed) {
     if (firstChange) {
@@ -5992,23 +6017,22 @@ function dragPeakHandle(handle, point, phase) {
       drag.changed = true;
     }
     state.peaks[drag.index] = moved;
-    if (atStart) state.preview = drag.preview;
-    else previewDraggedPeak(drag, moved);
+    if (atStart) {
+      state.preview = drag.preview;
+      state.result = drag.result;
+    } else {
+      previewDraggedPeak(drag, moved);
+      recordManualModel();
+    }
     refreshPeakRow(moved);
     byId("plot-coordinates").textContent = atStart ? drag.coordinates : handle.kind === "width" ? `FWHM ${decimal(moved.fwhm, 5)} eV` : `Center ${decimal(moved.center, 5)} eV \xB7 Height ${displayNumber(moved.height, 4)}`;
     renderFit();
   }
   if (phase === "end") {
     peakDrag = void 0;
-    if (drag.changed) {
-      if (state.peaks[drag.index] === drag.peak) {
-        state.result = drag.result;
-        renderFit();
-      }
-      renderChart();
-    }
+    if (drag.changed) renderChart();
   } else if (changed) {
-    renderChart({ updateLegend: firstChange });
+    renderChart({ updateLegend: previousStatus !== state.result?.status });
   }
 }
 var drawChart = createSpectrumChart(byId("spectrum"), byId("tooltip"), choosePeak, setZoom, dragPeakHandle);
@@ -6079,9 +6103,8 @@ for (const button of document.querySelectorAll("[data-view]")) {
 byId("reset-zoom").addEventListener("click", () => setZoom(rangeOf(state.points)));
 byId("background").addEventListener("change", (event) => {
   notice();
-  invalidate();
   state.method = event.target.value;
-  recalculate();
+  refreshAnalysis();
   render();
 });
 byId("range-form").addEventListener("submit", (event) => {
@@ -6127,9 +6150,10 @@ byId("peak-rows").addEventListener("change", (event) => {
     toast("Enter a value within the allowed range and constraints.");
     return;
   }
+  if (peak[key] === value) return;
   peak[key] = value;
   invalidate();
-  updatePreview();
+  updateManualModel();
   renderFit();
   renderChart();
   const area = input.closest("tr").querySelector(".number");
@@ -6147,7 +6171,7 @@ byId("peak-rows").addEventListener("click", (event) => {
   } else {
     invalidate();
     state.peaks = state.peaks.filter((peak) => peak.id !== id);
-    updatePreview();
+    updateManualModel();
     render();
   }
 });

@@ -57,13 +57,13 @@ test('standard CSV sanitizes imported labels and keeps the energy and intensity 
   assert.deepEqual(parseSpectrum(csv).y, spectrum.y);
 });
 
-test('reopening the standard CSV restores multiple saved components and fit parameters', () => {
+test('reopening a standard CSV restores manually adjusted and fitted curves with their status', () => {
   const peaks = [
     { id: 2, label: 'Matrix', shape: 'gaussian', center: 100.8, fwhm: 1.2, height: 5, mix: 0, fixed: { center: true } },
     { id: 4, label: '酸化物', shape: 'pseudo-voigt', center: 102.5, fwhm: 1.5, height: 2, mix: 0.4,
       bounds: { fwhm: [1, Infinity] }, doublet: { separation: 0.606, ratio: 2 } },
   ];
-  const csv = spectrumToCsv({
+  const saved = {
     ...spectrum,
     columns: [
       { label: 'Background', values: spectrum.background },
@@ -75,17 +75,23 @@ test('reopening the standard CSV restores multiple saved components and fit para
       { label: 'Doublet 2 secondary - Oxide', values: [0, 0.2, 1] },
       { label: 'Original binding energy (eV)', values: spectrum.originalX },
     ],
-    analysis: { version: 1, method: 'linear', offset: -0.5, range: [100, 102], peaks, status: 'converged' },
-  });
-  const restored = parseSpectrum(csv).analysis;
-  assert.equal(restored.metadata.offset, -0.5);
-  assert.deepEqual(restored.originalX, spectrum.originalX);
-  assert.deepEqual(restored.residual, spectrum.residual);
-  assert.deepEqual(restored.metadata.peaks.map(({ id, label }) => [id, label]), [[2, 'Matrix'], [4, 'Peak 2']]);
-  assert.deepEqual(restored.metadata.peaks[0].fixed, { center: true });
-  assert.deepEqual(restored.metadata.peaks[1].bounds, { fwhm: [1, null] });
-  assert.deepEqual(restored.metadata.peaks[1].doublet, { separation: 0.606, ratio: 2 });
-  assert.deepEqual(restored.components.map(({ values }) => values), [[2, 3, 1], [0, 1, 3]]);
+    analysis: { version: 1, method: 'linear', offset: -0.5, range: [100, 102], peaks },
+  };
+  for (const status of ['manual', 'converged', null]) {
+    const csv = spectrumToCsv({ ...saved, analysis: { ...saved.analysis, status } });
+    assert.doesNotMatch(csv.replace(/^\uFEFF/, ''), nonAscii);
+    const restored = parseSpectrum(csv).analysis;
+    assert.equal(restored.metadata.status, status);
+    assert.equal(restored.metadata.offset, -0.5);
+    assert.deepEqual(restored.originalX, spectrum.originalX);
+    assert.deepEqual(restored.fit, spectrum.fit);
+    assert.deepEqual(restored.residual, spectrum.residual);
+    assert.deepEqual(restored.metadata.peaks.map(({ id, label }) => [id, label]), [[2, 'Matrix'], [4, 'Peak 2']]);
+    assert.deepEqual(restored.metadata.peaks[0].fixed, { center: true });
+    assert.deepEqual(restored.metadata.peaks[1].bounds, { fwhm: [1, null] });
+    assert.deepEqual(restored.metadata.peaks[1].doublet, { separation: 0.606, ratio: 2 });
+    assert.deepEqual(restored.components.map(({ values }) => values), [[2, 3, 1], [0, 1, 3]]);
+  }
 });
 
 test('pre-metadata Japanese CSV restores every saved component in energy order', () => {

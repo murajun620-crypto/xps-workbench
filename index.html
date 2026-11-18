@@ -182,9 +182,9 @@
         <li>Open a CSV, TSV, TXT, XLSX, or VAMAS spectrum. Use Region to choose a measurement or Excel sheet.</li>
         <li>Enter an energy offset, or enter the measured and reference energies of a known peak.</li>
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
-        <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The fit uses the new values as its starting point. Use Constraints to fix values, set limits, or adjust the pseudo-Voigt Lorentzian fraction.</li>
+        <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
-        <li>Export CSV to reopen the analysis in Workbench. For Plot Launcher, export a project or use XPS Fit CSV to load the data with that preset.</li>
+        <li>Export CSV to reopen the model, components, and residuals in Workbench. Plot Launcher and XPS Fit CSV also include the residuals.</li>
       </ol>
       <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>
     </dialog>

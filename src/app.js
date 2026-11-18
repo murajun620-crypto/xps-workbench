@@ -6,7 +6,7 @@ import { MIN_PEAK_FWHM, movePeakHandle } from './peak-handles.js';
 import { PLOT_LAUNCHER_URL, toPlotLauncherFitCsv, toPlotLauncherProject } from './plot-launcher.js';
 import { restorePeakFromCurve } from './restore-peaks.js';
 import { installUpdateCheck } from './updates.js';
-import { analyzeBackground, estimatePeak, evaluateFit, fitPeaks, peakArea, shiftSpectrum } from './xps.js';
+import { analyzeBackground, estimatePeak, evaluateFit, fitPeaks, fitStatistics, peakArea, shiftSpectrum } from './xps.js';
 
 const byId = (id) => document.getElementById(id);
 const iconPaths = {
@@ -126,6 +126,24 @@ function updatePreview() {
   });
 }
 
+function recordManualModel() {
+  if (!state.peaks.length) return;
+  state.result = { ...state.preview, status: 'manual', iterations: 0, converged: false };
+  state.preview = state.result;
+}
+
+function updateManualModel() {
+  updatePreview();
+  recordManualModel();
+}
+
+function refreshAnalysis() {
+  const hadResult = Boolean(state.result);
+  invalidate();
+  recalculate();
+  if (hadResult) recordManualModel();
+}
+
 function savedSection(values) {
   if (!values) return null;
   const section = values.slice(state.start, state.start + state.section.length);
@@ -176,19 +194,19 @@ function restoreAnalysis(saved) {
   }
   updatePreview();
   const fit = savedSection(saved.fit);
-  if (!fit || !state.peaks.length) return;
+  if (!state.peaks.length) return;
+  if (!fit) {
+    if (metadata?.status === 'manual') recordManualModel();
+    return;
+  }
   const residuals = savedSection(saved.residual) || fit.map((value, i) => state.section[i].y - value);
-  const count = residuals.length;
-  const mean = state.section.reduce((sum, { y }) => sum + y / count, 0);
-  const total = state.section.reduce((sum, { y }) => sum + (y - mean) ** 2, 0);
-  const error = residuals.reduce((sum, value) => sum + value ** 2, 0);
   const status = metadata?.status || 'restored';
   const components = metadata
     ? state.peaks.map((_, i) => curves[i] || state.preview.components[i])
     : curves.filter(Boolean);
   state.result = {
-    peaks: state.peaks, fit, residuals, rSquared: total > 0 ? 1 - error / total : null,
-    rmse: Math.sqrt(error / count), iterations: metadata?.iterations ?? 0, status,
+    peaks: state.peaks, fit, residuals, ...fitStatistics(state.section, residuals),
+    iterations: metadata?.iterations ?? 0, status,
     converged: status === 'converged' || status === 'fixed',
     components,
     lines: state.peaks.map((peak, i) => peak.doublet ? state.preview.lines[i] : [components[i]]),
@@ -338,7 +356,6 @@ function applyShift(offset) {
     notice('This offset leaves too few points in the analysis range.');
     return;
   }
-  invalidate();
   notice();
   state.offset = offset;
   state.range = [low, high];
@@ -353,7 +370,7 @@ function applyShift(offset) {
     } : peak.bounds,
   }));
   state.pick = null;
-  recalculate();
+  refreshAnalysis();
   syncControls();
   render();
 }
@@ -371,10 +388,14 @@ function setRange(min, max) {
     notice('Include at least three measured points in the analysis range.');
     return;
   }
-  invalidate();
+  if (min === state.range[0] && max === state.range[1]) {
+    notice();
+    syncControls();
+    return;
+  }
   state.range = [min, max];
   notice();
-  recalculate();
+  refreshAnalysis();
   syncControls();
   render();
 }
@@ -458,7 +479,8 @@ function renderChart({ updateLegend = true } = {}) {
     corrected ? sparseAligned(state.section.map(({ y }, i) => y - background[i])) : measurement,
     { primary: true, marker: true, order: 4 });
   if (state.peaks.length) {
-    add('total', state.result ? 'Total fit' : 'Initial model', '#a995ff',
+    const label = state.result?.status === 'manual' ? 'Manual model' : state.result ? 'Total fit' : 'Initial model';
+    add('total', label, '#a995ff',
       sparseAligned(fit.map((y, i) => corrected ? y - background[i] : y)), { width: 2.4, order: 3 });
   }
   if (!corrected && state.method !== 'none') {
@@ -475,8 +497,7 @@ function renderChart({ updateLegend = true } = {}) {
       });
     });
   });
-  const previousFit = peakDrag?.revision === state.revision ? peakDrag.result : null;
-  const residualExists = Boolean(state.result || previousFit) && state.peaks.length > 0;
+  const residualExists = state.peaks.length > 0;
   if (residualExists) {
     add('residual', 'Residual', '#9cb3ff', [], { residualOnly: true });
   }
@@ -558,10 +579,12 @@ function renderFit() {
   const labels = {
     converged: 'Converged', fixed: 'Evaluated with fixed parameters', 'stalled': 'Optimization stalled',
     'iteration-limit': 'Iteration limit reached', 'insufficient-points': 'Too few points for the free parameters',
-    restored: 'Restored fit',
+    restored: 'Restored fit', manual: 'Manual model',
   };
-  status.classList.toggle('success', !!result?.converged);
-  status.classList.toggle('warning', !!result && !result.converged && result.status !== 'restored');
+  const manual = result?.status === 'manual';
+  status.classList.toggle('success', !state.fitting && !!result?.converged);
+  status.classList.toggle('manual', !state.fitting && manual);
+  status.classList.toggle('warning', !state.fitting && !!result && !manual && !result.converged && result.status !== 'restored');
   status.textContent = state.fitting ? 'Fitting…' : result ? labels[result.status] : 'Fit not run';
   byId('r-squared').value = Number.isFinite(result?.rSquared) ? result.rSquared.toFixed(5) : '—';
   byId('rmse').value = displayNumber(result?.rmse, 3);
@@ -756,7 +779,7 @@ function applyConstraints(event) {
   }
   invalidate();
   state.peaks = state.peaks.map((item) => item.id === peak.id ? next : item);
-  updatePreview();
+  updateManualModel();
   byId('peak-dialog').close();
   render();
 }
@@ -764,7 +787,9 @@ function applyConstraints(event) {
 function runFit() {
   if (state.fitting || !state.peaks.length) return;
   notice();
+  const previous = state.result;
   invalidate();
+  state.result = previous;
   state.fitting = true;
   const revision = state.revision;
   const args = [state.section, state.background.values, state.peaks, { energyScale: state.spectrum.energyScale }];
@@ -774,6 +799,7 @@ function runFit() {
     if (revision !== state.revision) return;
     invalidate();
     if (error) {
+      state.result = previous;
       notice('Fit failed. Check the initial centers, FWHMs, heights, and constraints.');
     } else {
       state.result = result;
@@ -942,7 +968,7 @@ function choosePeak(x) {
     }
     state.peaks.push(buildPeak(peak));
     state.pick = null;
-    updatePreview();
+    updateManualModel();
     render();
   }
 }
@@ -972,10 +998,11 @@ function previewDraggedPeak(drag, peak) {
   const fit = drag.preview.fit.map((value, i) => value - previous[i] + component[i]);
   const components = drag.preview.components.slice();
   const lines = drag.preview.lines.slice();
+  const residuals = fit.map((value, i) => state.section[i].y - value);
   components[drag.index] = component;
   lines[drag.index] = updated.lines[0];
   state.preview = {
-    peaks: state.peaks, fit, components, lines, residuals: fit.map((value, i) => state.section[i].y - value),
+    peaks: state.peaks, fit, components, lines, residuals, ...fitStatistics(state.section, residuals),
   };
 }
 
@@ -1016,6 +1043,7 @@ function dragPeakHandle(handle, point, phase) {
   const moved = atStart ? drag.peak : movePeakHandle(drag.peak, handle.kind, { ...point, side: handle.side }, state.range, backgroundAt);
   const current = state.peaks[drag.index];
   const changed = moved.center !== current.center || moved.height !== current.height || moved.fwhm !== current.fwhm;
+  const previousStatus = state.result?.status;
   const firstChange = changed && !drag.changed;
   if (changed) {
     if (firstChange) {
@@ -1024,8 +1052,13 @@ function dragPeakHandle(handle, point, phase) {
       drag.changed = true;
     }
     state.peaks[drag.index] = moved;
-    if (atStart) state.preview = drag.preview;
-    else previewDraggedPeak(drag, moved);
+    if (atStart) {
+      state.preview = drag.preview;
+      state.result = drag.result;
+    } else {
+      previewDraggedPeak(drag, moved);
+      recordManualModel();
+    }
     refreshPeakRow(moved);
     byId('plot-coordinates').textContent = atStart ? drag.coordinates : handle.kind === 'width'
       ? `FWHM ${decimal(moved.fwhm, 5)} eV`
@@ -1034,15 +1067,9 @@ function dragPeakHandle(handle, point, phase) {
   }
   if (phase === 'end') {
     peakDrag = undefined;
-    if (drag.changed) {
-      if (state.peaks[drag.index] === drag.peak) {
-        state.result = drag.result;
-        renderFit();
-      }
-      renderChart();
-    }
+    if (drag.changed) renderChart();
   } else if (changed) {
-    renderChart({ updateLegend: firstChange });
+    renderChart({ updateLegend: previousStatus !== state.result?.status });
   }
 }
 
@@ -1116,9 +1143,8 @@ for (const button of document.querySelectorAll('[data-view]')) {
 byId('reset-zoom').addEventListener('click', () => setZoom(rangeOf(state.points)));
 byId('background').addEventListener('change', (event) => {
   notice();
-  invalidate();
   state.method = event.target.value;
-  recalculate();
+  refreshAnalysis();
   render();
 });
 byId('range-form').addEventListener('submit', (event) => {
@@ -1165,9 +1191,10 @@ byId('peak-rows').addEventListener('change', (event) => {
     toast('Enter a value within the allowed range and constraints.');
     return;
   }
+  if (peak[key] === value) return;
   peak[key] = value;
   invalidate();
-  updatePreview();
+  updateManualModel();
   renderFit();
   renderChart();
   const area = input.closest('tr').querySelector('.number');
@@ -1185,7 +1212,7 @@ byId('peak-rows').addEventListener('click', (event) => {
   } else {
     invalidate();
     state.peaks = state.peaks.filter((peak) => peak.id !== id);
-    updatePreview();
+    updateManualModel();
     render();
   }
 });

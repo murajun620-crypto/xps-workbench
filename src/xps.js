@@ -210,16 +210,7 @@ export function estimatePeak(points, background, center) {
   };
 }
 
-export function evaluateFit(points, background, peaks, options) {
-  const lines = peaks.map((peak) => peakLines(peak, options).map((line) =>
-    points.map(({ x }) => lineValue(x, line))));
-  const components = lines.map(([primary, secondary]) => secondary
-    ? primary.map((value, index) => value + secondary[index])
-    : primary);
-  const fit = points.map((_, index) => components.reduce(
-    (sum, component) => sum + component[index], background[index],
-  ));
-  const residuals = points.map(({ y }, index) => y - fit[index]);
+export function fitStatistics(points, residuals) {
   let squaredError = 0;
   let mean = 0;
   let variation = 0;
@@ -230,14 +221,22 @@ export function evaluateFit(points, background, peaks, options) {
     squaredError += residuals[index] * residuals[index];
   }
   return {
-    peaks,
-    components,
-    lines,
-    fit,
-    residuals,
     rmse: points.length ? Math.sqrt(squaredError / points.length) : null,
     rSquared: variation > 0 ? 1 - squaredError / variation : null,
   };
+}
+
+export function evaluateFit(points, background, peaks, options) {
+  const lines = peaks.map((peak) => peakLines(peak, options).map((line) =>
+    points.map(({ x }) => lineValue(x, line))));
+  const components = lines.map(([primary, secondary]) => secondary
+    ? primary.map((value, index) => value + secondary[index])
+    : primary);
+  const fit = points.map((_, index) => components.reduce(
+    (sum, component) => sum + component[index], background[index],
+  ));
+  const residuals = points.map(({ y }, index) => y - fit[index]);
+  return { peaks, components, lines, fit, residuals, ...fitStatistics(points, residuals) };
 }
 
 function parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale) {

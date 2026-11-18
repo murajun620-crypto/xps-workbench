@@ -6,7 +6,7 @@ const MAX_METADATA_CHARS = 32_000;
 const MAX_PEAKS = 12;
 const methods = new Set(['none', 'linear', 'shirley']);
 const shapes = new Set(['gaussian', 'lorentzian', 'pseudo-voigt']);
-const statuses = new Set(['converged', 'fixed', 'stalled', 'iteration-limit', 'insufficient-points', 'restored']);
+const statuses = new Set(['converged', 'fixed', 'stalled', 'iteration-limit', 'insufficient-points', 'restored', 'manual']);
 const parameters = ['center', 'fwhm', 'height', 'mix'];
 
 function peakMetadata(peak, index, sanitizeLabel) {
