@@ -60,14 +60,16 @@ export function toPlotLauncherFitCsv({
     if (!components.length) values.push(undefined);
     rows.push(values.map(csvValue).join(','));
   }
-  return `\uFEFF${rows.join('\r\n')}\r\n`;
+  const csv = `\uFEFF${rows.join('\r\n')}\r\n`;
+  // The text is ASCII apart from the three-byte UTF-8 BOM.
+  if (csv.length + 2 > MAX_CSV_BYTES) {
+    throw new Error('Plot Launcher supports up to 30 MB of CSV data.');
+  }
+  return csv;
 }
 
 function encodeCsv(csv) {
   const bytes = new TextEncoder().encode(csv);
-  if (bytes.length > MAX_CSV_BYTES) {
-    throw new Error('Plot Launcher projects support up to 30 MB of CSV data.');
-  }
   let binary = '';
   for (let index = 0; index < bytes.length; index += 32768) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 32768));
@@ -76,7 +78,7 @@ function encodeCsv(csv) {
 }
 
 export function toPlotLauncherProject({
-  name, yUnit, energyScale = 'binding', components = [], ...data
+  name, energyScale = 'binding', components = [], ...data
 }) {
   const stem = englishExportFilename(name, 'xps-fit').slice(0, 120);
   const filename = `${stem}.csv`;
@@ -99,13 +101,14 @@ export function toPlotLauncherProject({
       data: { filename, sheet: 'CSV', headerRow: 1 },
       plotType: 'XPS Fit',
       axes: {
+        // Project import requires an axes object and skips preset application.
+        // Set only the native XPS Fit defaults that differ from its base axes.
         xLabel: energyScale === 'kinetic' ? 'Kinetic energy' : 'Binding energy',
         xUnit: 'eV',
         yLabel: 'Intensity',
-        yUnit: englishExportLabel(yUnit, 'arb. units'),
-        width: 5.2,
-        height: 3.6,
-        legend: false,
+        yUnit: 'arb. units',
+        hideYTicks: true,
+        hideYTickLabels: true,
       },
       series: [{
         x: 0, y: 1, xColumn: 'Abscissa', yColumn: 'Ordinate', name: 'Measured intensity',

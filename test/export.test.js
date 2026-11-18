@@ -33,6 +33,10 @@ test('Plot Launcher XPS Fit uses the native fixed columns and net peak curves', 
   ]);
   assert.deepEqual(rows.at(-1).map(Number), [100, 3, -1, 2, 1, 100.5, 4, 2]);
   assert.deepEqual(project.settings.options.fills, [{ x: 0, upper: 7, lower: 3, color: '#704dd9', alpha: 0.3 }]);
+  assert.deepEqual(project.settings.axes, {
+    xLabel: 'Binding energy', xUnit: 'eV', yLabel: 'Intensity', yUnit: 'arb. units',
+    hideYTicks: true, hideYTickLabels: true,
+  });
 });
 
 test('an unfitted kinetic spectrum opens with valid axes and blank fit columns', () => {

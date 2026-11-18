@@ -33,6 +33,7 @@ h1, h2, h3, p { margin: 0; }
 .brand-mark { display: grid; place-items: center; border-radius: 10px; width: 36px; height: 36px; color: white; background: #191b35; }
 .brand-mark svg { width: 27px; }
 .top-actions, .release-controls, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
+.export-actions { flex-wrap: wrap; }
 .release-controls { margin-inline-start: auto; }
 .app-version { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .button, .quiet, .text-button, .icon-button { border-radius: 8px; font-size: .875rem; font-weight: 630; }

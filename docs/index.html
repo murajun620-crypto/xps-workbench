@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="xps-version" content="1.3.0">
-    <meta name="xps-build" content="c50c66d9f877">
+    <meta name="xps-version" content="1.3.1">
+    <meta name="xps-build" content="22003199b1a1">
     <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
@@ -45,6 +45,7 @@ h1, h2, h3, p { margin: 0; }
 .brand-mark { display: grid; place-items: center; border-radius: 10px; width: 36px; height: 36px; color: white; background: #191b35; }
 .brand-mark svg { width: 27px; }
 .top-actions, .release-controls, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
+.export-actions { flex-wrap: wrap; }
 .release-controls { margin-inline-start: auto; }
 .app-version { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .button, .quiet, .text-button, .icon-button { border-radius: 8px; font-size: .875rem; font-weight: 630; }
@@ -331,6 +332,7 @@ td .number-input {
         <div id="workspace-exports" class="export-actions" hidden>
           <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
           <button id="export-plot" class="button" type="button"><span data-icon="external"></span>Plot Launcher</button>
+          <button id="export-plot-csv" class="button" type="button" title="CSV for the Plot Launcher XPS Fit preset"><span data-icon="download"></span>XPS Fit CSV</button>
         </div>
       </div>
       <div id="global-error" class="notice error" role="alert" hidden></div>
@@ -474,7 +476,7 @@ td .number-input {
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The fit uses the new values as its starting point. Use Constraints to fix values, set limits, or adjust the pseudo-Voigt Lorentzian fraction.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
-        <li>Inspect the residuals and components. Export a CSV to reopen the analysis, or export a Plot Launcher XPS Fit project.</li>
+        <li>Export CSV to reopen the analysis in Workbench. For Plot Launcher, export a project or use XPS Fit CSV to load the data with that preset.</li>
       </ol>
       <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>
     </dialog>
@@ -4327,14 +4329,15 @@ function toPlotLauncherFitCsv({
     if (!components.length) values.push(void 0);
     rows.push(values.map(csvValue2).join(","));
   }
-  return `\uFEFF${rows.join("\r\n")}\r
+  const csv = `\uFEFF${rows.join("\r\n")}\r
 `;
+  if (csv.length + 2 > MAX_CSV_BYTES) {
+    throw new Error("Plot Launcher supports up to 30 MB of CSV data.");
+  }
+  return csv;
 }
 function encodeCsv(csv) {
   const bytes = new TextEncoder().encode(csv);
-  if (bytes.length > MAX_CSV_BYTES) {
-    throw new Error("Plot Launcher projects support up to 30 MB of CSV data.");
-  }
   let binary = "";
   for (let index = 0; index < bytes.length; index += 32768) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 32768));
@@ -4343,7 +4346,6 @@ function encodeCsv(csv) {
 }
 function toPlotLauncherProject({
   name,
-  yUnit,
   energyScale = "binding",
   components = [],
   ...data
@@ -4368,13 +4370,14 @@ function toPlotLauncherProject({
       data: { filename, sheet: "CSV", headerRow: 1 },
       plotType: "XPS Fit",
       axes: {
+        // Project import requires an axes object and skips preset application.
+        // Set only the native XPS Fit defaults that differ from its base axes.
         xLabel: energyScale === "kinetic" ? "Kinetic energy" : "Binding energy",
         xUnit: "eV",
         yLabel: "Intensity",
-        yUnit: englishExportLabel(yUnit, "arb. units"),
-        width: 5.2,
-        height: 3.6,
-        legend: false
+        yUnit: "arb. units",
+        hideYTicks: true,
+        hideYTickLabels: true
       },
       series: [{
         x: 0,
@@ -5762,46 +5765,41 @@ function runFit() {
     fallback();
   }
 }
-function exportPayload(project, plotLauncher, name) {
+var exportFormats = {
+  csv: { description: "Spectrum CSV", extension: ".csv", mime: "text/csv" },
+  plotproject: { description: "Plot Launcher XPS Fit project", extension: ".plotproject", mime: "application/json" },
+  xpsFitCsv: { description: "Plot Launcher XPS Fit CSV", extension: ".csv", mime: "text/csv" }
+};
+function exportPayload(project, format, name) {
   const { result, spectrum: { energyScale, y, yUnit }, method, peaks } = project;
+  const forPlotLauncher = format !== "csv";
+  const model = result ?? (forPlotLauncher && peaks.length ? project.preview : null);
   const originalX = project.original.map((point) => point.x);
   const x = project.points.map((point) => point.x);
   const { values: baseline } = project.background;
   const align = (values) => sparseAligned(values, null, project);
   const corrected = align(project.section.map((point, i) => point.y - baseline[i]));
-  const background = method !== "none" || result ? align(baseline) : void 0;
-  const fit = result ? align(result.fit) : void 0;
-  const residual = result ? align(result.residuals) : void 0;
-  const components = (result?.components ?? []).map((values, i) => ({
-    label: peaks[i].label,
-    values: align(values),
-    color: darkPeakColors[peaks[i].id % darkPeakColors.length]
-  }));
-  if (plotLauncher) {
-    const lines = (result?.lines ?? []).flatMap((members, i) => members.map((values, member) => ({ ...components[i], label: lineLabel(peaks[i], member), values: align(values) })));
-    return toPlotLauncherProject({
-      name,
-      x,
-      y,
-      yUnit,
-      energyScale,
-      corrected,
-      originalX,
-      background,
-      fit,
-      residual,
-      components: lines
-    });
+  const background = method !== "none" || model ? align(baseline) : void 0;
+  const fit = model ? align(model.fit) : void 0;
+  const residual = model ? align(model.residuals) : void 0;
+  if (forPlotLauncher) {
+    const components = (model?.lines ?? []).flatMap((members, i) => members.map((values, member) => ({
+      label: lineLabel(peaks[i], member),
+      values: align(values),
+      color: darkPeakColors[peaks[i].id % darkPeakColors.length]
+    })));
+    const data = { name, x, y, energyScale, corrected, originalX, background, fit, residual, components };
+    return format === "plotproject" ? toPlotLauncherProject(data) : toPlotLauncherFitCsv(data);
   }
   const columns = [];
   if (method !== "none") columns.push({ label: "Background", values: background });
   columns.push({ label: "Background-subtracted intensity", values: corrected });
   if (result) {
     columns.push({ label: "Total fit", values: fit }, { label: "Residual", values: residual });
-    components.forEach(({ label, values }, i) => {
+    result.components.forEach((values, i) => {
       const prefix = `Peak ${i + 1}`;
-      const sanitized = englishExportLabel(label, prefix);
-      columns.push({ label: sanitized === prefix ? prefix : `${prefix} - ${sanitized}`, values });
+      const sanitized = englishExportLabel(peaks[i].label, prefix);
+      columns.push({ label: sanitized === prefix ? prefix : `${prefix} - ${sanitized}`, values: align(values) });
       if (peaks[i].doublet) {
         result.lines[i].forEach((line2, member) => {
           columns.push({ label: `Doublet ${i + 1} ${lineMember(member)} - ${sanitized}`, values: align(line2) });
@@ -5841,17 +5839,16 @@ function downloadBlob(blob, filename) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 3e4);
 }
-async function exportData(plotLauncher) {
+async function exportData(format) {
   if (!state.spectrum) return;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
   const { dataset, spectrum, sourceHandle } = project;
   const stem = englishExportFilename(spectrum.filename || spectrum.name);
   const region = dataset.regions?.length > 1 ? `-${englishExportFilename(spectrum.name, `region-${Number(byId("region").value) + 1}`)}` : "";
-  const name = `${(stem + region).slice(0, 116)}-xps`;
-  const extension = plotLauncher ? ".plotproject" : ".csv";
+  const suffix = format === "xpsFitCsv" ? "-xps-fit" : "-xps";
+  const name = (stem + region).slice(0, 120 - suffix.length) + suffix;
+  const { extension, mime, description } = exportFormats[format];
   const filename = name + extension;
-  const mime = plotLauncher ? "application/json" : "text/csv";
-  const description = plotLauncher ? "Plot Launcher XPS Fit project" : "Spectrum CSV";
   try {
     let destination;
     if (sourceHandle && typeof window.showSaveFilePicker === "function") {
@@ -5866,8 +5863,8 @@ async function exportData(plotLauncher) {
         if (!pickerUnavailable(error)) throw error;
       }
     }
-    const blob = new Blob([exportPayload(project, plotLauncher, name)], {
-      type: plotLauncher ? mime : mime + ";charset=utf-8"
+    const blob = new Blob([exportPayload(project, format, name)], {
+      type: extension === ".csv" ? mime + ";charset=utf-8" : mime
     });
     if (destination) {
       const writer = await destination.createWritable();
@@ -6159,8 +6156,9 @@ byId("doublet-enabled").addEventListener("change", syncDoubletControls);
 byId("peak-form").addEventListener("input", () => {
   for (const input of byId("peak-form").querySelectorAll("input")) input.setCustomValidity("");
 });
-byId("export-csv").addEventListener("click", () => exportData(false));
-byId("export-plot").addEventListener("click", () => exportData(true));
+byId("export-csv").addEventListener("click", () => exportData("csv"));
+byId("export-plot").addEventListener("click", () => exportData("plotproject"));
+byId("export-plot-csv").addEventListener("click", () => exportData("xpsFitCsv"));
 byId("show-help").addEventListener("click", () => byId("help-dialog").showModal());
 var launcherLink = document.createElement("a");
 launcherLink.href = PLOT_LAUNCHER_URL;

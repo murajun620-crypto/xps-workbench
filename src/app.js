@@ -3,7 +3,7 @@ import { demoSpectrum, readSpectrumFile, spectrumToCsv } from './data.js';
 import { englishExportFilename, englishExportLabel } from './export-labels.js';
 import { installNumberInputs } from './number-input.js';
 import { MIN_PEAK_FWHM, movePeakHandle } from './peak-handles.js';
-import { PLOT_LAUNCHER_URL, toPlotLauncherProject } from './plot-launcher.js';
+import { PLOT_LAUNCHER_URL, toPlotLauncherFitCsv, toPlotLauncherProject } from './plot-launcher.js';
 import { restorePeakFromCurve } from './restore-peaks.js';
 import { installUpdateCheck } from './updates.js';
 import { analyzeBackground, estimatePeak, evaluateFit, fitPeaks, peakArea, shiftSpectrum } from './xps.js';
@@ -801,27 +801,32 @@ function runFit() {
   }
 }
 
-function exportPayload(project, plotLauncher, name) {
+const exportFormats = {
+  csv: { description: 'Spectrum CSV', extension: '.csv', mime: 'text/csv' },
+  plotproject: { description: 'Plot Launcher XPS Fit project', extension: '.plotproject', mime: 'application/json' },
+  xpsFitCsv: { description: 'Plot Launcher XPS Fit CSV', extension: '.csv', mime: 'text/csv' },
+};
+
+function exportPayload(project, format, name) {
   const { result, spectrum: { energyScale, y, yUnit }, method, peaks } = project;
+  const forPlotLauncher = format !== 'csv';
+  const model = result ?? (forPlotLauncher && peaks.length ? project.preview : null);
   const originalX = project.original.map((point) => point.x);
   const x = project.points.map((point) => point.x);
   const { values: baseline } = project.background;
   const align = (values) => sparseAligned(values, null, project);
   const corrected = align(project.section.map((point, i) => point.y - baseline[i]));
-  const background = method !== 'none' || result ? align(baseline) : undefined;
-  const fit = result ? align(result.fit) : undefined;
-  const residual = result ? align(result.residuals) : undefined;
-  const components = (result?.components ?? []).map((values, i) => ({
-    label: peaks[i].label,
-    values: align(values),
-    color: darkPeakColors[peaks[i].id % darkPeakColors.length],
-  }));
-  if (plotLauncher) {
-    const lines = (result?.lines ?? []).flatMap((members, i) =>
-      members.map((values, member) => ({ ...components[i], label: lineLabel(peaks[i], member), values: align(values) })));
-    return toPlotLauncherProject({
-      name, x, y, yUnit, energyScale, corrected, originalX, background, fit, residual, components: lines,
-    });
+  const background = method !== 'none' || model ? align(baseline) : undefined;
+  const fit = model ? align(model.fit) : undefined;
+  const residual = model ? align(model.residuals) : undefined;
+  if (forPlotLauncher) {
+    const components = (model?.lines ?? []).flatMap((members, i) =>
+      members.map((values, member) => ({
+        label: lineLabel(peaks[i], member), values: align(values),
+        color: darkPeakColors[peaks[i].id % darkPeakColors.length],
+      })));
+    const data = { name, x, y, energyScale, corrected, originalX, background, fit, residual, components };
+    return format === 'plotproject' ? toPlotLauncherProject(data) : toPlotLauncherFitCsv(data);
   }
 
   const columns = [];
@@ -829,10 +834,10 @@ function exportPayload(project, plotLauncher, name) {
   columns.push({ label: 'Background-subtracted intensity', values: corrected });
   if (result) {
     columns.push({ label: 'Total fit', values: fit }, { label: 'Residual', values: residual });
-    components.forEach(({ label, values }, i) => {
+    result.components.forEach((values, i) => {
       const prefix = `Peak ${i + 1}`;
-      const sanitized = englishExportLabel(label, prefix);
-      columns.push({ label: sanitized === prefix ? prefix : `${prefix} - ${sanitized}`, values });
+      const sanitized = englishExportLabel(peaks[i].label, prefix);
+      columns.push({ label: sanitized === prefix ? prefix : `${prefix} - ${sanitized}`, values: align(values) });
       if (peaks[i].doublet) {
         result.lines[i].forEach((line, member) => {
           columns.push({ label: `Doublet ${i + 1} ${lineMember(member)} - ${sanitized}`, values: align(line) });
@@ -866,18 +871,17 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-async function exportData(plotLauncher) {
+async function exportData(format) {
   if (!state.spectrum) return;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
   const { dataset, spectrum, sourceHandle } = project;
   const stem = englishExportFilename(spectrum.filename || spectrum.name);
   const region = dataset.regions?.length > 1
     ? `-${englishExportFilename(spectrum.name, `region-${Number(byId('region').value) + 1}`)}` : '';
-  const name = `${(stem + region).slice(0, 116)}-xps`;
-  const extension = plotLauncher ? '.plotproject' : '.csv';
+  const suffix = format === 'xpsFitCsv' ? '-xps-fit' : '-xps';
+  const name = (stem + region).slice(0, 120 - suffix.length) + suffix;
+  const { extension, mime, description } = exportFormats[format];
   const filename = name + extension;
-  const mime = plotLauncher ? 'application/json' : 'text/csv';
-  const description = plotLauncher ? 'Plot Launcher XPS Fit project' : 'Spectrum CSV';
 
   try {
     let destination;
@@ -894,8 +898,8 @@ async function exportData(plotLauncher) {
       }
     }
 
-    const blob = new Blob([exportPayload(project, plotLauncher, name)], {
-      type: plotLauncher ? mime : mime + ';charset=utf-8',
+    const blob = new Blob([exportPayload(project, format, name)], {
+      type: extension === '.csv' ? mime + ';charset=utf-8' : mime,
     });
     if (destination) {
       const writer = await destination.createWritable();
@@ -1190,8 +1194,9 @@ byId('doublet-enabled').addEventListener('change', syncDoubletControls);
 byId('peak-form').addEventListener('input', () => {
   for (const input of byId('peak-form').querySelectorAll('input')) input.setCustomValidity('');
 });
-byId('export-csv').addEventListener('click', () => exportData(false));
-byId('export-plot').addEventListener('click', () => exportData(true));
+byId('export-csv').addEventListener('click', () => exportData('csv'));
+byId('export-plot').addEventListener('click', () => exportData('plotproject'));
+byId('export-plot-csv').addEventListener('click', () => exportData('xpsFitCsv'));
 byId('show-help').addEventListener('click', () => byId('help-dialog').showModal());
 const launcherLink = document.createElement('a');
 launcherLink.href = PLOT_LAUNCHER_URL;
