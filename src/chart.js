@@ -70,21 +70,130 @@ function path(ctx, values, x, y, first, last, stride) {
   }
 }
 
-export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
+function handleKey(handle) {
+  return `${handle.id}:${handle.kind}`;
+}
+
+function drawHandle(ctx, item, active) {
+  const { handle, x, y } = item;
+  const radius = active ? 7 : 5;
+  ctx.save();
+  ctx.beginPath();
+  if (handle.kind === 'top') {
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+  } else {
+    ctx.moveTo(x, y - radius - 1);
+    ctx.lineTo(x + radius + 1, y);
+    ctx.lineTo(x, y + radius + 1);
+    ctx.lineTo(x - radius - 1, y);
+    ctx.closePath();
+  }
+  ctx.globalAlpha = handle.editable === false ? 0.48 : 1;
+  ctx.fillStyle = handle.editable === false ? '#111a2e' : handle.color;
+  ctx.strokeStyle = active ? '#ffffff' : '#111a2e';
+  ctx.lineWidth = active ? 2.25 : 1.5;
+  ctx.fill();
+  ctx.stroke();
+  if (handle.editable === false) {
+    ctx.strokeStyle = handle.color;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
   const ctx = canvas.getContext('2d');
+  const frame = canvas.parentElement;
+  const document = canvas.ownerDocument;
+  const targets = new Map();
   let model;
   let scales;
+  let handles = [];
   let pointer = null;
   let drag = null;
+  let pendingHandleCoordinates = null;
   let scheduled = false;
 
   function schedule() {
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => {
-      scheduled = false;
+      try {
+        if (pendingHandleCoordinates && drag?.handle) {
+          const coordinates = pendingHandleCoordinates;
+          pendingHandleCoordinates = null;
+          onHandleDrag(drag.handle, coordinates, 'move');
+        }
+      } finally {
+        scheduled = false;
+      }
       draw();
     });
+  }
+
+  function nearestHandle(position, radius = 13) {
+    let nearest;
+    let distance = radius ** 2;
+    for (const item of handles) {
+      if (item.handle.editable === false) continue;
+      const candidate = (item.x - position.x) ** 2 + (item.y - position.y) ** 2;
+      if (candidate < distance) {
+        distance = candidate;
+        nearest = item;
+      }
+    }
+    return nearest;
+  }
+
+  function syncHandleTargets() {
+    const visible = new Set();
+    for (const { handle, x, y } of handles) {
+      if (handle.editable === false) continue;
+      const key = handleKey(handle);
+      visible.add(key);
+      let button = targets.get(key);
+      if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.peakHandle = key;
+        Object.assign(button.style, {
+          position: 'absolute', width: '34px', height: '34px', transform: 'translate(-50%, -50%)',
+          padding: '0', border: '0', borderRadius: '50%', background: 'transparent',
+          touchAction: 'none', cursor: handle.kind === 'width' ? 'ew-resize' : 'grab',
+        });
+        button.setAttribute('aria-keyshortcuts', handle.kind === 'width'
+          ? 'ArrowLeft ArrowRight' : 'ArrowLeft ArrowRight ArrowUp ArrowDown');
+        button.addEventListener('focus', schedule);
+        button.addEventListener('blur', schedule);
+        button.addEventListener('keydown', (event) => {
+          const move = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+          const current = model?.handles?.find((handle) => handleKey(handle) === key);
+          if (!move || !current || current.editable === false || !scales || drag ||
+            (current.kind === 'width' && move[1])) return;
+          event.preventDefault();
+          const amount = event.shiftKey ? 10 : 2;
+          const start = { x: current.x, y: current.y };
+          const end = {
+            x: move[0] ? start.x + (scales.energyAt(move[0] * amount) - scales.energyAt(0)) : start.x,
+            y: move[1] ? start.y + (scales.intensityAt(move[1] * amount) - scales.intensityAt(0)) : start.y,
+          };
+          onHandleDrag(current, start, 'start');
+          onHandleDrag(current, end, 'move');
+          onHandleDrag(current, end, 'end');
+        });
+        targets.set(key, button);
+        frame.append(button);
+      }
+      button.style.left = `${x}px`;
+      button.style.top = `${y}px`;
+      button.setAttribute('aria-label', handle.label || (handle.kind === 'width' ? 'Adjust peak width' : 'Move peak center and height'));
+    }
+    for (const [key, button] of targets) {
+      if (!visible.has(key)) {
+        button.remove();
+        targets.delete(key);
+      }
+    }
   }
 
   function draw() {
@@ -104,7 +213,8 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
     const top = 14;
     const residualBottom = height - 51;
     const residualTop = residualBottom - 54;
-    const mainBottom = model.residual ? residualTop - 16 : residualBottom;
+    const hasResidual = drag?.handle ? drag.scales.hasResidual : Boolean(model.residual);
+    const mainBottom = hasResidual ? residualTop - 16 : residualBottom;
     const [xMin, xMax] = model.zoom;
     const span = xMax - xMin;
     const xValue = (value) => left + (model.reverse
@@ -131,13 +241,23 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
         residualMax = Math.max(residualMax, Math.abs(model.residual[i]));
       }
     }
-    const yPad = (yMax - yMin || 1) * 0.075;
-    yMax += yPad;
-    yMin -= yMin < 0 ? yPad : 0;
+    if (drag?.handle) {
+      ({ yMin, yMax } = drag.scales);
+    } else {
+      for (const handle of model.handles || []) {
+        if (handle.x < xMin || handle.x > xMax || !Number.isFinite(handle.y)) continue;
+        yMin = Math.min(yMin, handle.y);
+        yMax = Math.max(yMax, handle.y);
+      }
+      const yPad = (yMax - yMin || 1) * 0.075;
+      yMax += yPad;
+      yMin -= yMin < 0 ? yPad : 0;
+    }
     residualMax = residualMax * 1.12 || 1;
     const y = (value) => mainBottom - (value - yMin) * (mainBottom - top) / (yMax - yMin);
+    const intensityAt = (pixel) => yMin + (mainBottom - pixel) * (yMax - yMin) / (mainBottom - top);
     const residualY = (value) => (residualTop + residualBottom) / 2 - value / residualMax * (residualBottom - residualTop) / 2;
-    scales = { left, top, right, bottom: residualBottom, energyAt };
+    scales = { left, top, right, bottom: residualBottom, energyAt, intensityAt, yMin, yMax, hasResidual };
 
     if (model.range[0] > xMin || model.range[1] < xMax) {
       const [rangeLeft, rangeRight] = model.range.map(xValue).sort((a, b) => a - b);
@@ -223,6 +343,20 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
         ctx.stroke();
       }
     }
+    ctx.setLineDash([]);
+    handles = onHandleDrag ? (model.handles || []).map((handle) => ({
+      handle, x: xValue(handle.x), y: y(handle.y),
+    })).filter(({ x, y }) => x >= left && x <= right && y >= top && y <= mainBottom) : [];
+    syncHandleTargets();
+    const hovered = pointer && !drag ? nearestHandle(pointer) : null;
+    const focused = document.activeElement?.dataset.peakHandle;
+    const activeKey = drag?.handle ? handleKey(drag.handle) : hovered ? handleKey(hovered.handle) : focused;
+    let activeHandle;
+    for (const item of handles) {
+      if (handleKey(item.handle) === activeKey) activeHandle = item;
+      else drawHandle(ctx, item, false);
+    }
+    if (activeHandle) drawHandle(ctx, activeHandle, true);
     ctx.restore();
     ctx.setLineDash([]);
     ctx.lineWidth = 1;
@@ -260,7 +394,7 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
     ctx.fillText(model.yLabel, 0, 0);
     ctx.restore();
 
-    if (pointer && pointer.x >= left && pointer.x <= right && pointer.y >= top && pointer.y <= residualBottom) {
+    if (pointer && !drag?.handle && !hovered && pointer.x >= left && pointer.x <= right && pointer.y >= top && pointer.y <= residualBottom) {
       const index = nearestIndex(model.x, energyAt(pointer.x));
       const at = x(index);
       if (drag && Math.abs(pointer.x - drag.x) >= 7) {
@@ -288,50 +422,102 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom) {
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
 
-  canvas.addEventListener('pointerdown', (event) => {
-    if (!scales || event.button !== 0) return;
+  function handleCoordinates(position) {
+    const { handle, scales, x, y } = drag;
+    return {
+      x: handle.x + (scales.energyAt(position.x) - scales.energyAt(x)),
+      y: handle.y + (scales.intensityAt(position.y) - scales.intensityAt(y)),
+    };
+  }
+
+  frame.addEventListener('pointerdown', (event) => {
+    if (!scales || drag || event.button !== 0) return;
     const position = point(event);
+    const target = nearestHandle(position, event.pointerType === 'touch' ? 17 : 13);
     if (position.x < scales.left || position.x > scales.right ||
-      position.y < scales.top || position.y > scales.bottom) return;
+      position.y < scales.top || position.y > scales.bottom) {
+      if (!target) return;
+    }
     drag = { ...position, pointerId: event.pointerId };
     pointer = position;
+    if (target) {
+      drag.handle = target.handle;
+      drag.scales = scales;
+      canvas.style.cursor = target.handle.kind === 'width' ? 'ew-resize' : 'grabbing';
+      onHandleDrag(drag.handle, handleCoordinates(position), 'start');
+    }
     canvas.setPointerCapture(event.pointerId);
     schedule();
   });
-  canvas.addEventListener('pointermove', (event) => {
-    if (!model) return;
+  frame.addEventListener('pointermove', (event) => {
+    if (!model || (drag && drag.pointerId !== event.pointerId)) return;
     pointer = point(event);
-    if (drag) pointer.x = Math.min(scales.right, Math.max(scales.left, pointer.x));
+    if (drag?.handle) {
+      pendingHandleCoordinates = handleCoordinates(pointer);
+    } else if (drag) {
+      pointer.x = Math.min(scales.right, Math.max(scales.left, pointer.x));
+    }
     schedule();
   });
-  canvas.addEventListener('pointerup', (event) => {
-    if (!drag || !scales) return;
-    const { x } = point(event);
-    const to = Math.min(scales.right, Math.max(scales.left, x));
-    if (Math.abs(to - drag.x) >= 7) {
-      onZoom([scales.energyAt(drag.x), scales.energyAt(to)].sort((a, b) => a - b));
+  frame.addEventListener('pointerup', (event) => {
+    if (!drag || !scales || drag.pointerId !== event.pointerId) return;
+    if (drag.handle) {
+      const handle = drag.handle;
+      const coordinates = handleCoordinates(point(event));
+      drag = null;
+      pendingHandleCoordinates = null;
+      canvas.style.cursor = '';
+      onHandleDrag(handle, coordinates, 'end');
     } else {
-      onPick(model.x[nearestIndex(model.x, scales.energyAt(to))]);
+      const to = Math.min(scales.right, Math.max(scales.left, point(event).x));
+      if (Math.abs(to - drag.x) >= 7) {
+        onZoom([scales.energyAt(drag.x), scales.energyAt(to)].sort((a, b) => a - b));
+      } else {
+        onPick(model.x[nearestIndex(model.x, scales.energyAt(to))]);
+      }
+      drag = null;
     }
-    drag = null;
     pointer = null;
     schedule();
   });
-  for (const name of ['pointerleave', 'pointercancel']) {
-    canvas.addEventListener(name, () => {
-      if (name === 'pointercancel') drag = null;
-      if (!drag) pointer = null;
-      schedule();
-    });
+  frame.addEventListener('pointerleave', () => {
+    if (!drag) pointer = null;
+    schedule();
+  });
+  function cancelDrag(pointerId) {
+    if (!drag || drag.pointerId !== pointerId) return;
+    const handle = drag.handle;
+    drag = null;
+    pendingHandleCoordinates = null;
+    pointer = null;
+    if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+    if (handle) {
+      canvas.style.cursor = '';
+      onHandleDrag(handle, { x: handle.x, y: handle.y }, 'cancel');
+    }
+    schedule();
   }
+  for (const name of ['pointercancel', 'lostpointercapture']) {
+    frame.addEventListener(name, (event) => cancelDrag(event.pointerId));
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && drag?.handle) cancelDrag(drag.pointerId);
+  });
   new ResizeObserver(schedule).observe(canvas);
   return (nextModel) => {
     model = nextModel;
+    if (!model?.handles?.length) {
+      handles = [];
+      syncHandleTargets();
+    }
     if (!model) {
-      if (drag && canvas.hasPointerCapture(drag.pointerId)) canvas.releasePointerCapture(drag.pointerId);
+      const pointerId = drag?.pointerId;
       scales = null;
       pointer = null;
       drag = null;
+      pendingHandleCoordinates = null;
+      canvas.style.cursor = '';
+      if (pointerId != null && canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
       tooltip.hidden = true;
       tooltip.textContent = '';
       if (ctx) {

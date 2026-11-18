@@ -2,6 +2,7 @@ import { createSpectrumChart } from './chart.js';
 import { demoSpectrum, readSpectrumFile, spectrumToCsv } from './data.js';
 import { englishExportFilename, englishExportLabel } from './export-labels.js';
 import { installNumberInputs } from './number-input.js';
+import { MIN_PEAK_FWHM, movePeakHandle } from './peak-handles.js';
 import { PLOT_LAUNCHER_URL, toPlotLauncherProject } from './plot-launcher.js';
 import { restorePeakFromCurve } from './restore-peaks.js';
 import { installUpdateCheck } from './updates.js';
@@ -40,10 +41,11 @@ const shapeOptions = [
 ];
 const fields = [
   ['center', 'Center (eV)', -Infinity, Infinity],
-  ['fwhm', 'FWHM (eV)', 0.000001, Infinity],
+  ['fwhm', 'FWHM (eV)', MIN_PEAK_FWHM, Infinity],
   ['height', 'Height', 0, Infinity],
   ['mix', 'Lorentzian fraction (%)', 0, 1],
 ];
+const peakColumns = [['center', 'Center', 5], ['fwhm', 'FWHM', 5], ['height', 'Height', 4]];
 const si2pDoublet = { separation: 0.606, ratio: 2 };
 const maxPeaks = 12;
 const spectrumFileType = {
@@ -68,6 +70,7 @@ let statusTimeout;
 let fitWorker;
 let workerObjectUrl;
 let constraintPeakId;
+let peakDrag;
 
 function decimal(value, digits = 3) {
   return Number.isFinite(value)
@@ -215,6 +218,7 @@ function showAnalysis(visible) {
 
 function resetProject() {
   ++fileLoad;
+  peakDrag = undefined;
   invalidate();
   Object.assign(state, emptyProject());
   showAnalysis(false);
@@ -251,6 +255,7 @@ function resetProject() {
 }
 
 function assignSpectrum(spectrum) {
+  peakDrag = undefined;
   invalidate();
   notice();
   state.spectrum = spectrum;
@@ -390,7 +395,56 @@ function lineLabel(peak, index) {
   return peak.doublet ? `${peak.label} (${lineMember(index)})` : peak.label;
 }
 
-function renderChart() {
+function backgroundAt(energy) {
+  if (state.view === 'corrected') return 0;
+  const points = state.section;
+  const values = state.background.values;
+  let low = 0;
+  let high = points.length - 1;
+  if (energy <= points[low].x) return values[low];
+  if (energy >= points[high].x) return values[high];
+  while (high - low > 1) {
+    const middle = (low + high) >>> 1;
+    if (points[middle].x <= energy) low = middle;
+    else high = middle;
+  }
+  const fraction = (energy - points[low].x) / (points[high].x - points[low].x);
+  return values[low] + fraction * (values[high] - values[low]);
+}
+
+function getPeakHandles() {
+  if (state.pick || !state.section.length) return [];
+  const low = Math.max(state.zoom[0], state.section[0].x);
+  const high = Math.min(state.zoom[1], state.section.at(-1).x);
+  const visible = (x) => x >= low && x <= high;
+  return state.peaks.flatMap((peak) => {
+    if (!visible(peak.center) || state.disabledSeries.has(`p${peak.id}`)) return [];
+    const color = peakColors[peak.id % peakColors.length];
+    const editable = (name) => !peak.fixed?.[name] &&
+      !(peak.bounds?.[name] && peak.bounds[name][0] === peak.bounds[name][1]);
+    const halfWidth = peak.fwhm / 2;
+    const side = peakDrag?.handle.peakId === peak.id && peakDrag.handle.kind === 'width'
+      ? peakDrag.handle.side
+      : visible(peak.center + halfWidth) || !visible(peak.center - halfWidth) ? 1 : -1;
+    const half = peak.center + side * halfWidth;
+    const primary = lineLabel(peak, 0);
+    return [
+      {
+        id: `top-${peak.id}`, peakId: peak.id, kind: 'top', x: peak.center,
+        y: backgroundAt(peak.center) + peak.height, color,
+        editable: editable('center') || editable('height'),
+        label: `${primary} peak position and height`,
+      },
+      {
+        id: `width-${peak.id}`, peakId: peak.id, kind: 'width', side, x: half,
+        y: backgroundAt(half) + peak.height / 2, color, editable: editable('fwhm'),
+        label: `${primary} FWHM`,
+      },
+    ];
+  });
+}
+
+function renderChart({ updateLegend = true } = {}) {
   const corrected = state.view === 'corrected';
   const measurement = state.spectrum.y;
   const { fit, lines, residuals } = state.preview;
@@ -421,10 +475,25 @@ function renderChart() {
       });
     });
   });
-  const residualExists = !!state.result && state.peaks.length > 0;
+  const previousFit = peakDrag?.revision === state.revision ? peakDrag.result : null;
+  const residualExists = Boolean(state.result || previousFit) && state.peaks.length > 0;
   if (residualExists) {
     add('residual', 'Residual', '#9cb3ff', [], { residualOnly: true });
   }
+  if (updateLegend) renderLegend(series);
+  drawChart({
+    x: state.points.map(({ x }) => x),
+    zoom: state.zoom, range: state.range,
+    series: series.filter((item) => !item.residualOnly),
+    residual: residualExists && !state.disabledSeries.has('residual') ? sparseAligned(residuals) : null,
+    handles: getPeakHandles(),
+    reverse: state.spectrum.energyScale !== 'kinetic',
+    xLabel: `${energyName()} (eV)`,
+    yLabel: state.spectrum.yUnit ? `Intensity (${state.spectrum.yUnit})` : 'Intensity',
+  });
+}
+
+function renderLegend(series) {
   const legend = byId('legend');
   const focusedId = legend.contains(document.activeElement) ? document.activeElement.dataset.series : null;
   legend.replaceChildren(...series.map(({ id, label, color, visible, marker, dash }) => {
@@ -439,15 +508,6 @@ function renderChart() {
     return button;
   }));
   if (focusedId) [...legend.children].find((button) => button.dataset.series === focusedId)?.focus();
-  drawChart({
-    x: state.points.map(({ x }) => x),
-    zoom: state.zoom, range: state.range,
-    series: series.filter((item) => !item.residualOnly),
-    residual: residualExists && !state.disabledSeries.has('residual') ? sparseAligned(residuals) : null,
-    reverse: state.spectrum.energyScale !== 'kinetic',
-    xLabel: `${energyName()} (eV)`,
-    yLabel: state.spectrum.yUnit ? `Intensity (${state.spectrum.yUnit})` : 'Intensity',
-  });
 }
 
 function render() {
@@ -479,7 +539,9 @@ function renderPick() {
     peak: 'Click the peak center · Press Esc to cancel',
     doublet: `Click the ${primary} line of the doublet · Press Esc to cancel`,
     reference: 'Click the measured reference peak · Press Esc to cancel',
-  }[state.pick] || 'Drag to zoom · Click to inspect energy';
+  }[state.pick] || (state.peaks.length
+    ? 'Drag a circle to adjust position and height · Drag a diamond to change FWHM · Drag the plot to zoom'
+    : 'Drag to zoom · Click to inspect energy');
 }
 
 function renderBackground() {
@@ -561,7 +623,7 @@ function renderPeaks() {
     select.replaceChildren(...shapeOptions.map(([value, label]) => new Option(label, value)));
     select.value = peak.shape;
     row.insertCell().append(select);
-    for (const [key, label, digits] of [['center', 'Center', 5], ['fwhm', 'FWHM', 5], ['height', 'Height', 4]]) {
+    for (const [key, label, digits] of peakColumns) {
       const input = rowInput(peak, key, label, digits);
       if (peak.doublet) input.title = key === 'fwhm' ? 'Shared by both lines' : `Primary line ${label.toLowerCase()}`;
       row.insertCell().append(input);
@@ -888,7 +950,99 @@ function setZoom(range) {
   renderChart();
 }
 
-const drawChart = createSpectrumChart(byId('spectrum'), byId('tooltip'), choosePeak, setZoom);
+function refreshPeakRow(peak) {
+  const row = byId('peak-rows').querySelector(`tr[data-id="${peak.id}"]`);
+  if (!row) return;
+  for (const [key, , digits] of peakColumns) {
+    row.querySelector(`[data-field="${key}"]`).value = decimal(peak[key], digits);
+  }
+  row.querySelector('.number').textContent = displayNumber(peakArea(peak), 2);
+}
+
+function previewDraggedPeak(drag, peak) {
+  const updated = evaluateFit(state.section, state.background.values, [peak], {
+    energyScale: state.spectrum.energyScale,
+  });
+  const previous = drag.preview.components[drag.index];
+  const component = updated.components[0];
+  const fit = drag.preview.fit.map((value, i) => value - previous[i] + component[i]);
+  const components = drag.preview.components.slice();
+  const lines = drag.preview.lines.slice();
+  components[drag.index] = component;
+  lines[drag.index] = updated.lines[0];
+  state.preview = {
+    peaks: state.peaks, fit, components, lines, residuals: fit.map((value, i) => state.section[i].y - value),
+  };
+}
+
+function dragPeakHandle(handle, point, phase) {
+  if (phase === 'start') {
+    if (state.pick) return;
+    const index = state.peaks.findIndex(({ id }) => id === handle.peakId);
+    if (index >= 0) {
+      peakDrag = {
+        handle, index, peak: state.peaks[index], preview: state.preview,
+        result: state.result, revision: state.revision, changed: false,
+        coordinates: byId('plot-coordinates').textContent,
+      };
+    }
+    return;
+  }
+
+  const drag = peakDrag;
+  if (!drag || drag.handle.id !== handle.id || drag.revision !== state.revision) {
+    if (phase !== 'move') peakDrag = undefined;
+    return;
+  }
+  if (phase === 'cancel') {
+    peakDrag = undefined;
+    if (drag.changed) {
+      state.peaks[drag.index] = drag.peak;
+      state.preview = drag.preview;
+      state.result = drag.result;
+      byId('plot-coordinates').textContent = drag.coordinates;
+      refreshPeakRow(drag.peak);
+      renderFit();
+      renderChart();
+    }
+    return;
+  }
+
+  const atStart = point.x === drag.handle.x && (handle.kind === 'width' || point.y === drag.handle.y);
+  const moved = atStart ? drag.peak : movePeakHandle(drag.peak, handle.kind, { ...point, side: handle.side }, state.range, backgroundAt);
+  const current = state.peaks[drag.index];
+  const changed = moved.center !== current.center || moved.height !== current.height || moved.fwhm !== current.fwhm;
+  const firstChange = changed && !drag.changed;
+  if (changed) {
+    if (firstChange) {
+      invalidate();
+      drag.revision = state.revision;
+      drag.changed = true;
+    }
+    state.peaks[drag.index] = moved;
+    if (atStart) state.preview = drag.preview;
+    else previewDraggedPeak(drag, moved);
+    refreshPeakRow(moved);
+    byId('plot-coordinates').textContent = atStart ? drag.coordinates : handle.kind === 'width'
+      ? `FWHM ${decimal(moved.fwhm, 5)} eV`
+      : `Center ${decimal(moved.center, 5)} eV · Height ${displayNumber(moved.height, 4)}`;
+    renderFit();
+  }
+  if (phase === 'end') {
+    peakDrag = undefined;
+    if (drag.changed) {
+      if (state.peaks[drag.index] === drag.peak) {
+        state.result = drag.result;
+        renderFit();
+      }
+      renderChart();
+    }
+  } else if (changed) {
+    renderChart({ updateLegend: firstChange });
+  }
+}
+
+const drawChart = createSpectrumChart(byId('spectrum'), byId('tooltip'), choosePeak, setZoom, dragPeakHandle);
 
 async function open(readSource, nativePicker = false) {
   const load = ++fileLoad;
@@ -940,6 +1094,7 @@ byId('reference-form').addEventListener('submit', (event) => {
 byId('pick-reference').addEventListener('click', () => {
   state.pick = state.pick === 'reference' ? null : 'reference';
   renderPick();
+  renderChart();
 });
 for (const button of document.querySelectorAll('[data-shift-mode]')) {
   button.addEventListener('click', () => {
@@ -976,6 +1131,7 @@ for (const kind of ['peak', 'doublet']) {
     }
     state.pick = state.pick === kind ? null : kind;
     renderPick();
+    renderChart();
     if (state.pick && window.innerWidth <= 780) byId('plot').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 }
@@ -1050,6 +1206,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && state.pick) {
     state.pick = null;
     renderPick();
+    renderChart();
   }
 });
 document.addEventListener('dragover', (event) => {
