@@ -44,6 +44,7 @@ const fields = [
   ['height', 'Height', 0, Infinity],
   ['mix', 'Lorentzian fraction (%)', 0, 1],
 ];
+const si2pDoublet = { separation: 0.606, ratio: 2 };
 const maxPeaks = 12;
 const spectrumFileType = {
   description: 'Spectrum files',
@@ -117,7 +118,9 @@ function recalculate() {
 }
 
 function updatePreview() {
-  state.preview = evaluateFit(state.section, state.background.values, state.peaks);
+  state.preview = evaluateFit(state.section, state.background.values, state.peaks, {
+    energyScale: state.spectrum.energyScale,
+  });
 }
 
 function savedSection(values) {
@@ -177,13 +180,15 @@ function restoreAnalysis(saved) {
   const total = state.section.reduce((sum, { y }) => sum + (y - mean) ** 2, 0);
   const error = residuals.reduce((sum, value) => sum + value ** 2, 0);
   const status = metadata?.status || 'restored';
+  const components = metadata
+    ? state.peaks.map((_, i) => curves[i] || state.preview.components[i])
+    : curves.filter(Boolean);
   state.result = {
     peaks: state.peaks, fit, residuals, rSquared: total > 0 ? 1 - error / total : null,
     rmse: Math.sqrt(error / count), iterations: metadata?.iterations ?? 0, status,
     converged: status === 'converged' || status === 'fixed',
-    components: metadata
-      ? state.peaks.map((_, i) => curves[i] || state.preview.components[i])
-      : curves.filter(Boolean),
+    components,
+    lines: state.peaks.map((peak, i) => peak.doublet ? state.preview.lines[i] : [components[i]]),
   };
   state.preview = state.result;
 }
@@ -237,6 +242,8 @@ function resetProject() {
   const constraints = byId('peak-dialog');
   if (constraints.open) constraints.close();
   byId('constraint-rows').replaceChildren();
+  byId('doublet-enabled').checked = false;
+  syncDoubletControls();
   constraintPeakId = undefined;
   renderPick();
   renderFit();
@@ -375,10 +382,18 @@ function sparseAligned(values, add = null, project = state) {
   return result;
 }
 
+function lineMember(index) {
+  return index === 0 ? 'primary' : 'secondary';
+}
+
+function lineLabel(peak, index) {
+  return peak.doublet ? `${peak.label} (${lineMember(index)})` : peak.label;
+}
+
 function renderChart() {
   const corrected = state.view === 'corrected';
   const measurement = state.spectrum.y;
-  const { fit, components, residuals } = state.preview;
+  const { fit, lines, residuals } = state.preview;
   const { values: background } = state.background;
   const baseline = corrected ? background.map(() => 0) : background;
   const series = [];
@@ -395,11 +410,15 @@ function renderChart() {
   if (!corrected && state.method !== 'none') {
     add('background', 'Background', '#9eaac7', sparseAligned(background), { dash: true, order: 2 });
   }
-  const alignedBaseline = components.length ? sparseAligned(baseline) : null;
-  components.forEach((values, index) => {
+  const alignedBaseline = lines.length ? sparseAligned(baseline) : null;
+  lines.forEach((members, index) => {
     const peak = state.peaks[index];
-    add(`p${peak.id}`, peak.label, peakColors[peak.id % peakColors.length], sparseAligned(values, baseline), {
-      base: alignedBaseline, start: state.start, end: state.start + state.section.length - 1, order: 1,
+    members.forEach((values, member) => {
+      const id = member ? `p${peak.id}-2` : `p${peak.id}`;
+      add(id, lineLabel(peak, member), peakColors[peak.id % peakColors.length], sparseAligned(values, baseline), {
+        base: alignedBaseline, start: state.start, end: state.start + state.section.length - 1,
+        order: 1, dash: member > 0,
+      });
     });
   });
   const residualExists = !!state.result && state.peaks.length > 0;
@@ -452,10 +471,13 @@ function render() {
 
 function renderPick() {
   byId('add-peak').setAttribute('aria-pressed', state.pick === 'peak');
+  byId('add-doublet').setAttribute('aria-pressed', state.pick === 'doublet');
   byId('pick-reference').setAttribute('aria-pressed', state.pick === 'reference');
   byId('pick-reference').classList.toggle('active', state.pick === 'reference');
+  const primary = state.spectrum?.energyScale === 'kinetic' ? 'higher-kinetic-energy' : 'lower-binding-energy';
   byId('plot-help').textContent = {
     peak: 'Click the peak center · Press Esc to cancel',
+    doublet: `Click the ${primary} line of the doublet · Press Esc to cancel`,
     reference: 'Click the measured reference peak · Press Esc to cancel',
   }[state.pick] || 'Drag to zoom · Click to inspect energy';
 }
@@ -512,7 +534,7 @@ function renderPeaks() {
     const cell = body.insertRow().insertCell();
     cell.colSpan = 7;
     cell.className = 'peak-empty';
-    cell.textContent = 'Select Add peak, then click the component center in the plot.';
+    cell.textContent = 'Select Add peak or Add doublet, then click a center in the plot.';
     return;
   }
   for (const peak of state.peaks) {
@@ -524,7 +546,15 @@ function renderPeaks() {
     swatch.className = 'swatch';
     swatch.style.setProperty('--swatch', darkPeakColors[peak.id % darkPeakColors.length]);
     name.append(swatch, rowInput(peak, 'label', 'name'));
-    row.insertCell().append(name);
+    const identity = row.insertCell();
+    identity.append(name);
+    if (peak.doublet) {
+      const summary = document.createElement('small');
+      summary.className = 'doublet-summary';
+      summary.textContent = `${decimal(peak.doublet.separation, 5)} eV · ${decimal(peak.doublet.ratio, 5)}:1`;
+      summary.title = 'Doublet separation and primary-to-secondary area ratio';
+      identity.append(summary);
+    }
     const select = document.createElement('select');
     select.dataset.field = 'shape';
     select.setAttribute('aria-label', `${peak.label} shape`);
@@ -532,18 +562,21 @@ function renderPeaks() {
     select.value = peak.shape;
     row.insertCell().append(select);
     for (const [key, label, digits] of [['center', 'Center', 5], ['fwhm', 'FWHM', 5], ['height', 'Height', 4]]) {
-      row.insertCell().append(rowInput(peak, key, label, digits));
+      const input = rowInput(peak, key, label, digits);
+      if (peak.doublet) input.title = key === 'fwhm' ? 'Shared by both lines' : `Primary line ${label.toLowerCase()}`;
+      row.insertCell().append(input);
     }
     const area = row.insertCell();
     area.className = 'number';
     area.textContent = displayNumber(peakArea(peak), 2);
-    area.title = 'Integral of the full component profile';
+    area.title = peak.doublet ? 'Integrated area of both lines' : 'Integral of the full component profile';
     const actions = document.createElement('div');
     actions.className = 'row-actions';
     for (const [action, glyph, label] of [['constraint', 'sliders', 'Constraints'], ['delete', 'trash', 'Delete']]) {
       const button = document.createElement('button');
       button.className = 'icon-button';
-      if (action === 'constraint' && (Object.values(peak.fixed || {}).some(Boolean) || Object.keys(peak.bounds || {}).length)) {
+      if (action === 'constraint' && (peak.doublet ||
+        Object.values(peak.fixed || {}).some(Boolean) || Object.keys(peak.bounds || {}).length)) {
         button.classList.add('constrained');
       }
       button.type = 'button';
@@ -555,6 +588,13 @@ function renderPeaks() {
     }
     row.insertCell().append(actions);
   }
+}
+
+function syncDoubletControls() {
+  const enabled = byId('doublet-enabled').checked;
+  const options = byId('doublet-options');
+  options.hidden = !enabled;
+  options.disabled = !enabled;
 }
 
 function openConstraints(peak) {
@@ -599,6 +639,13 @@ function openConstraints(peak) {
     }
   }
   rows.append(grid);
+  byId('doublet-enabled').checked = Boolean(peak.doublet);
+  const doublet = peak.doublet || si2pDoublet;
+  byId('doublet-separation').valueAsNumber = doublet.separation;
+  byId('doublet-ratio').valueAsNumber = doublet.ratio;
+  byId('doublet-separation').setCustomValidity('');
+  byId('doublet-ratio').setCustomValidity('');
+  syncDoubletControls();
   byId('peak-dialog').showModal();
 }
 
@@ -625,6 +672,26 @@ function applyConstraints(event) {
     if (fixed) next.fixed[key] = true;
     if (lower.value !== '' || upper.value !== '') next.bounds[key] = [low, high];
   }
+  if (byId('doublet-enabled').checked) {
+    const separationInput = byId('doublet-separation');
+    const ratioInput = byId('doublet-ratio');
+    const separation = separationInput.valueAsNumber;
+    const ratio = ratioInput.valueAsNumber;
+    const secondary = next.center + (state.spectrum.energyScale === 'kinetic' ? -separation : separation);
+    if (!(separation > 0) || !Number.isFinite(secondary) || secondary === next.center) {
+      separationInput.setCustomValidity('Enter a positive separation that gives two distinct line centers.');
+      separationInput.reportValidity();
+      return;
+    }
+    if (!(ratio > 0) || !Number.isFinite(1 / ratio) || !Number.isFinite(next.height / ratio)) {
+      ratioInput.setCustomValidity('Enter a positive area ratio with a finite secondary intensity.');
+      ratioInput.reportValidity();
+      return;
+    }
+    next.doublet = { separation, ratio };
+  } else {
+    delete next.doublet;
+  }
   invalidate();
   state.peaks = state.peaks.map((item) => item.id === peak.id ? next : item);
   updatePreview();
@@ -638,7 +705,7 @@ function runFit() {
   invalidate();
   state.fitting = true;
   const revision = state.revision;
-  const args = [state.section, state.background.values, state.peaks];
+  const args = [state.section, state.background.values, state.peaks, { energyScale: state.spectrum.energyScale }];
   renderFit();
   renderChart();
   function done(result, error) {
@@ -649,7 +716,7 @@ function runFit() {
     } else {
       state.result = result;
       state.peaks = result.peaks;
-      updatePreview();
+      state.preview = result;
     }
     render();
   }
@@ -688,8 +755,10 @@ function exportPayload(project, plotLauncher, name) {
     color: darkPeakColors[peaks[i].id % darkPeakColors.length],
   }));
   if (plotLauncher) {
+    const lines = (result?.lines ?? []).flatMap((members, i) =>
+      members.map((values, member) => ({ ...components[i], label: lineLabel(peaks[i], member), values: align(values) })));
     return toPlotLauncherProject({
-      name, x, y, yUnit, energyScale, corrected, originalX, background, fit, residual, components,
+      name, x, y, yUnit, energyScale, corrected, originalX, background, fit, residual, components: lines,
     });
   }
 
@@ -702,6 +771,11 @@ function exportPayload(project, plotLauncher, name) {
       const prefix = `Peak ${i + 1}`;
       const sanitized = englishExportLabel(label, prefix);
       columns.push({ label: sanitized === prefix ? prefix : `${prefix} - ${sanitized}`, values });
+      if (peaks[i].doublet) {
+        result.lines[i].forEach((line, member) => {
+          columns.push({ label: `Doublet ${i + 1} ${lineMember(member)} - ${sanitized}`, values: align(line) });
+        });
+      }
     });
   }
   const energy = energyScale === 'kinetic' ? 'kinetic' : 'binding';
@@ -786,13 +860,21 @@ function choosePeak(x) {
     state.pick = null;
     byId('target').focus();
     renderPick();
-  } else if (state.pick === 'peak') {
+  } else if (state.pick === 'peak' || state.pick === 'doublet') {
     if (x < state.range[0] || x > state.range[1]) {
       toast('Pick a position within the analysis range.');
       return;
     }
     invalidate();
-    state.peaks.push(buildPeak(estimatePeak(state.section, state.background.values, x)));
+    const peak = estimatePeak(state.section, state.background.values, x);
+    if (state.pick === 'doublet') {
+      peak.doublet = { ...si2pDoublet };
+      peak.label = 'Si 2p';
+      for (let n = 2; state.peaks.some(({ label }) => label === peak.label); n++) {
+        peak.label = `Si 2p ${n}`;
+      }
+    }
+    state.peaks.push(buildPeak(peak));
     state.pick = null;
     updatePreview();
     render();
@@ -886,15 +968,17 @@ byId('range-form').addEventListener('submit', (event) => {
 });
 byId('full-range').addEventListener('click', () => setRange(...rangeOf(state.points)));
 byId('fit').addEventListener('click', runFit);
-byId('add-peak').addEventListener('click', () => {
-  if (state.peaks.length >= maxPeaks) {
-    toast(`Add up to ${maxPeaks} peak components.`);
-    return;
-  }
-  state.pick = state.pick === 'peak' ? null : 'peak';
-  renderPick();
-  if (state.pick && window.innerWidth <= 780) byId('plot').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-});
+for (const kind of ['peak', 'doublet']) {
+  byId(`add-${kind}`).addEventListener('click', () => {
+    if (state.peaks.length >= maxPeaks) {
+      toast(`Add up to ${maxPeaks} peak components.`);
+      return;
+    }
+    state.pick = state.pick === kind ? null : kind;
+    renderPick();
+    if (state.pick && window.innerWidth <= 780) byId('plot').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+}
 byId('legend').addEventListener('click', (event) => {
   const id = event.target.closest('button')?.dataset.series;
   if (!id) return;
@@ -946,6 +1030,7 @@ byId('peak-rows').addEventListener('click', (event) => {
   }
 });
 byId('peak-form').addEventListener('submit', applyConstraints);
+byId('doublet-enabled').addEventListener('change', syncDoubletControls);
 byId('peak-form').addEventListener('input', () => {
   for (const input of byId('peak-form').querySelectorAll('input')) input.setCustomValidity('');
 });

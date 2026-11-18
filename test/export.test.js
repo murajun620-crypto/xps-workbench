@@ -57,7 +57,7 @@ test('reopening the standard CSV restores multiple saved components and fit para
   const peaks = [
     { id: 2, label: 'Matrix', shape: 'gaussian', center: 100.8, fwhm: 1.2, height: 5, mix: 0, fixed: { center: true } },
     { id: 4, label: '酸化物', shape: 'pseudo-voigt', center: 102.5, fwhm: 1.5, height: 2, mix: 0.4,
-      bounds: { fwhm: [1, Infinity] } },
+      bounds: { fwhm: [1, Infinity] }, doublet: { separation: 0.606, ratio: 2 } },
   ];
   const csv = spectrumToCsv({
     ...spectrum,
@@ -67,6 +67,8 @@ test('reopening the standard CSV restores multiple saved components and fit para
       { label: 'Residual', values: spectrum.residual },
       { label: 'Peak 1 - Matrix', values: [2, 3, 1] },
       { label: 'Peak 2 - Oxide', values: [0, 1, 3] },
+      { label: 'Doublet 2 primary - Oxide', values: [0, 0.8, 2] },
+      { label: 'Doublet 2 secondary - Oxide', values: [0, 0.2, 1] },
       { label: 'Original binding energy (eV)', values: spectrum.originalX },
     ],
     analysis: { version: 1, method: 'linear', offset: -0.5, range: [100, 102], peaks, status: 'converged' },
@@ -78,6 +80,7 @@ test('reopening the standard CSV restores multiple saved components and fit para
   assert.deepEqual(restored.metadata.peaks.map(({ id, label }) => [id, label]), [[2, 'Matrix'], [4, 'Peak 2']]);
   assert.deepEqual(restored.metadata.peaks[0].fixed, { center: true });
   assert.deepEqual(restored.metadata.peaks[1].bounds, { fwhm: [1, null] });
+  assert.deepEqual(restored.metadata.peaks[1].doublet, { separation: 0.606, ratio: 2 });
   assert.deepEqual(restored.components.map(({ values }) => values), [[2, 3, 1], [0, 1, 3]]);
 });
 

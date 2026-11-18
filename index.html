@@ -138,7 +138,10 @@
         <section class="card peaks-card" aria-labelledby="peaks-title">
           <div class="panel-head peaks-head">
             <div><h2 id="peaks-title">Peak components <span id="peak-count" class="counter"></span></h2><p class="muted">Edit component names and initial parameters.</p></div>
-            <button id="add-peak" class="button" type="button" aria-pressed="false"><span data-icon="plus"></span>Add peak</button>
+            <div class="peak-add-actions">
+              <button id="add-peak" class="button" type="button" aria-pressed="false"><span data-icon="plus"></span>Add peak</button>
+              <button id="add-doublet" class="button" type="button" aria-pressed="false"><span data-icon="plus"></span>Add doublet</button>
+            </div>
           </div>
           <div class="table-scroll" role="region" aria-label="Peak component table" tabindex="0">
             <table>
@@ -155,6 +158,20 @@
         <div class="dialog-head"><h2 id="peak-dialog-title">Peak constraints</h2><button type="button" data-close="peak-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
         <p class="muted">Fix a parameter or set bounds for the fit.</p>
         <div id="constraint-rows"></div>
+        <div class="doublet-constraints">
+          <label class="doublet-toggle"><input id="doublet-enabled" type="checkbox" aria-controls="doublet-options">Spin-orbit doublet</label>
+          <fieldset id="doublet-options" class="doublet-options" aria-label="Doublet parameters" hidden disabled>
+            <div class="number-field">
+              <label for="doublet-separation">Peak separation</label>
+              <div class="unit-input"><input id="doublet-separation" type="number" step="any" min="0" data-increment="0.001" required><span>eV</span></div>
+            </div>
+            <div class="number-field">
+              <label for="doublet-ratio">Primary : secondary area</label>
+              <div class="unit-input"><input id="doublet-ratio" type="number" step="any" min="0" data-increment="0.1" required><span>: 1</span></div>
+            </div>
+            <p class="muted">The fit holds separation and area ratio fixed. Both lines share FWHM and line shape. The primary is the lower-binding-energy line.</p>
+          </fieldset>
+        </div>
         <div class="dialog-actions"><button type="button" class="button" data-close="peak-dialog">Cancel</button><button type="submit" class="button solid">Apply</button></div>
       </form>
     </dialog>
@@ -165,6 +182,7 @@
         <li>Enter an energy offset, or enter the measured and reference energies of a known peak.</li>
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks, set their initial centers, widths, and heights, then select Run fit. Use Constraints to fix values, set limits, or adjust the pseudo-Voigt Lorentzian fraction.</li>
+        <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
         <li>Inspect the residuals and components. Export a CSV to reopen the analysis, or export a Plot Launcher XPS Fit project.</li>
       </ol>
       <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>

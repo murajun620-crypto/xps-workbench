@@ -12,7 +12,8 @@ The workspace opens empty, including after a refresh. Select Open data to start 
 2. Apply a direct energy offset or align a measured peak to a reference energy.
 3. Select an analysis range and a background method. Linear and iterative Shirley use the range endpoints. If Shirley cannot converge, the app displays a Linear fallback.
 4. Add peaks and set their initial centers, widths, and heights. The ▲/▼ controls and the Up/Down keys adjust numeric fields. Peak constraints support fixing values and setting bounds.
-5. Run the fit and inspect the components and residuals. Export an English CSV or a .plotproject that opens with Plot Launcher's XPS Fit preset. Reopen a Workbench CSV to restore the saved analysis. Older Workbench CSVs with component columns also restore those curves and estimate editable peak parameters from them.
+5. Select Add doublet and click the primary line to add a spin-orbit pair, or enable Spin-orbit doublet in an existing peak's Constraints. Si 2p starts with a 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit either value in Constraints. The primary line has the lower binding energy and the higher kinetic energy. Both lines share FWHM and line shape.
+6. Run the fit and inspect the components and residuals. Export an English CSV or a .plotproject that opens with Plot Launcher's XPS Fit preset. Workbench CSVs restore the saved analysis, including doublet settings. Older CSVs with component columns restore those curves and estimate editable peak parameters from them.
 
 The version is displayed beside Check for updates. A newer release opens in a new tab so the current analysis stays open.
 

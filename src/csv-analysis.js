@@ -12,6 +12,10 @@ const parameters = ['center', 'fwhm', 'height', 'mix'];
 function peakMetadata(peak, index, sanitizeLabel) {
   if (!peak || !shapes.has(peak.shape) || !parameters.every((key) => Number.isFinite(peak[key])) ||
     peak.fwhm <= 0 || peak.height < 0 || peak.mix < 0 || peak.mix > 1) return null;
+  const doublet = peak.doublet;
+  if (doublet !== undefined && (!Number.isFinite(doublet?.separation) || doublet.separation <= 0 ||
+    !Number.isFinite(doublet.ratio) || doublet.ratio <= 0 || !Number.isFinite(1 / doublet.ratio) ||
+    !Number.isFinite(peak.height / doublet.ratio))) return null;
   const fixed = {};
   const bounds = {};
   for (const key of parameters) {
@@ -37,6 +41,7 @@ function peakMetadata(peak, index, sanitizeLabel) {
     fwhm: peak.fwhm,
     height: peak.height,
     mix: peak.mix,
+    ...(doublet ? { doublet: { separation: doublet.separation, ratio: doublet.ratio } } : {}),
     ...(Object.keys(fixed).length ? { fixed } : {}),
     ...(Object.keys(bounds).length ? { bounds } : {}),
   };
