@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f6fb">
+    <meta name="description" content="XPSスペクトルのエネルギー補正、背景減算、ピークフィットをブラウザで。">
+    <title>XPS Workbench</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><path d="M4 19h4.2c1.4 0 2.4-.9 2.8-2.2l2.1-8.3a1.05 1.05 0 0 1 2.04 0l2.05 8.3c.35 1.3 1.42 2.2 2.75 2.2H24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 22h20" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" opacity=".55"/></svg></span>
+          <span>XPS <strong>Workbench</strong></span>
+        </div>
+        <div class="top-actions">
+          <button id="demo" class="quiet" type="button">サンプル</button>
+          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>データを開く</button>
+          <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx" hidden>
+        </div>
+      </div>
+    </header>
+    <main class="shell" id="workspace">
+      <div class="page-heading">
+        <div>
+          <p class="kicker">X-RAY PHOTOELECTRON SPECTROSCOPY</p>
+          <h1>スペクトル解析</h1>
+        </div>
+        <div class="export-actions">
+          <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
+          <button id="export-plot" class="button" type="button"><span data-icon="external"></span>Plot Launcher</button>
+        </div>
+      </div>
+      <div id="global-error" class="notice error" role="alert" hidden></div>
+      <div class="layout">
+        <section class="card chart-card" aria-labelledby="chart-title">
+          <div class="panel-head chart-head">
+            <div class="chart-file">
+              <p class="kicker">SPECTRUM</p>
+              <h2 id="chart-title">C 1s</h2>
+              <p id="spectrum-meta" class="muted chart-meta"></p>
+              <div id="region-wrap" class="region" hidden><label for="region">測定領域</label><select id="region"></select></div>
+            </div>
+            <div class="chart-actions">
+              <div class="segmented" aria-label="スペクトル表示">
+                <button type="button" data-view="raw" aria-pressed="true">測定</button>
+                <button type="button" data-view="corrected" aria-pressed="false">背景減算後</button>
+              </div>
+              <button id="reset-zoom" class="icon-button" type="button" title="表示範囲をリセット" aria-label="表示範囲をリセット"><span data-icon="expand"></span></button>
+            </div>
+          </div>
+          <div id="plot" class="plot">
+            <div id="legend" class="legend" role="group" aria-label="系列の表示"></div>
+            <div class="canvas-frame">
+              <canvas id="spectrum" aria-label="測定スペクトルとフィット曲線"></canvas>
+              <div id="tooltip" class="tooltip" hidden></div>
+            </div>
+          </div>
+          <div class="plot-footer"><span id="plot-help">ドラッグで拡大 · グラフをクリックしてピークを選択</span><span id="plot-coordinates"></span></div>
+        </section>
+
+        <aside class="card analysis-card" aria-labelledby="analysis-title">
+          <div class="panel-head settings-head">
+            <p class="kicker">ANALYSIS</p>
+            <h2 id="analysis-title">解析設定</h2>
+          </div>
+          <div class="settings-section">
+            <div class="section-heading"><span class="section-icon" data-icon="shift"></span><h3>エネルギーシフト</h3></div>
+            <div class="segmented stretch" aria-label="シフト方式">
+              <button type="button" data-shift-mode="direct" aria-pressed="true">直接入力</button>
+              <button type="button" data-shift-mode="reference" aria-pressed="false">参照ピーク</button>
+            </div>
+            <form id="direct-form" class="field-row">
+              <label for="offset">シフト量<div class="unit-input"><input type="number" id="offset" step="any" value="0" required><span>eV</span></div></label>
+              <button type="submit" class="button field-button">適用</button>
+            </form>
+            <form id="reference-form" hidden>
+              <div class="field-row">
+                <label for="observed">測定位置<div class="unit-input"><input type="number" id="observed" step="any" required><span>eV</span></div></label>
+                <label for="target">参照値<div class="unit-input"><input type="number" id="target" step="any" required><span>eV</span></div></label>
+              </div>
+              <div class="field-row reference-actions">
+                <button id="pick-reference" type="button" class="button secondary">グラフから選択</button>
+                <button type="submit" class="button field-button">適用</button>
+              </div>
+            </form>
+            <p class="muted section-note" id="shift-info">適用中　0.000 eV</p>
+          </div>
+          <div class="settings-section">
+            <div class="section-heading"><span class="section-icon" data-icon="layers"></span><h3>バックグラウンド</h3></div>
+            <label for="background">減算方式</label>
+            <select id="background">
+              <option value="shirley">Shirley（反復）</option>
+              <option value="linear">Linear（直線）</option>
+              <option value="none">なし</option>
+            </select>
+            <form id="range-form">
+              <div class="range-title"><span>解析範囲</span><button class="text-button" id="full-range" type="button">全範囲</button></div>
+              <div class="field-row range-fields">
+                <label class="sr-only" for="range-min">下限 (eV)</label>
+                <div class="unit-input"><input id="range-min" type="number" step="any" required><span>eV</span></div>
+                <span class="range-separator">–</span>
+                <label class="sr-only" for="range-max">上限 (eV)</label>
+                <div class="unit-input"><input id="range-max" type="number" step="any" required><span>eV</span></div>
+                <button class="button field-button" type="submit">適用</button>
+              </div>
+            </form>
+            <p id="background-info" class="muted section-note"></p>
+          </div>
+          <div class="settings-section fit-section">
+            <div class="section-heading"><span class="section-icon" data-icon="activity"></span><h3>ピークフィット</h3></div>
+            <div id="fit-status" class="fit-status" role="status"></div>
+            <div class="metrics">
+              <div><span>R²</span><output id="r-squared">—</output></div>
+              <div><span>RMSE</span><output id="rmse">—</output></div>
+            </div>
+            <button id="fit" type="button" class="button solid fit-button"><span data-icon="spark"></span>フィットを実行</button>
+          </div>
+        </aside>
+
+        <section class="card peaks-card" aria-labelledby="peaks-title">
+          <div class="panel-head peaks-head">
+            <div><h2 id="peaks-title">ピーク成分 <span id="peak-count" class="counter"></span></h2><p class="muted">名前と初期値を編集できます。</p></div>
+            <button id="add-peak" class="button" type="button" aria-pressed="false"><span data-icon="plus"></span>ピークを追加</button>
+          </div>
+          <div class="table-scroll" role="region" aria-label="ピーク成分の表" tabindex="0">
+            <table>
+              <thead><tr><th scope="col">成分</th><th scope="col">形状</th><th scope="col">位置 <small>eV</small></th><th scope="col">FWHM <small>eV</small></th><th scope="col">高さ</th><th scope="col">面積</th><th scope="col"><span class="sr-only">編集</span></th></tr></thead>
+              <tbody id="peak-rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <footer class="footer"><span><span data-icon="shield"></span>解析データはブラウザ内で処理されます</span><button id="show-help" class="text-button" type="button">使い方・参考資料</button></footer>
+    </main>
+    <dialog id="peak-dialog" aria-labelledby="peak-dialog-title">
+      <form id="peak-form">
+        <div class="dialog-head"><h2 id="peak-dialog-title">ピークの制約</h2><button type="button" data-close="peak-dialog" class="icon-button" aria-label="閉じる"><span data-icon="close"></span></button></div>
+        <p class="muted">値の固定、または自由変数の上下限を設定できます。</p>
+        <div id="constraint-rows"></div>
+        <div class="dialog-actions"><button type="button" class="button" data-close="peak-dialog">キャンセル</button><button type="submit" class="button solid">適用</button></div>
+      </form>
+    </dialog>
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <div class="dialog-head"><h2 id="help-title">使い方・参考資料</h2><button type="button" data-close="help-dialog" class="icon-button" aria-label="閉じる"><span data-icon="close"></span></button></div>
+      <ol class="help-list">
+        <li>CSV・TSV・TXT・Excel（.xlsx）のエネルギー／強度データ、またはVAMASのXPSデータを開きます。Excelに複数の測定シートがある場合は「測定領域」で切り替えます。</li>
+        <li>シフト量を入力するか、補正前の測定位置と参照値を入力します。</li>
+        <li>背景方式と解析範囲を指定します。ShirleyとLinearでは解析範囲の両端の測定強度を背景の端点に使います。</li>
+        <li>ピークを追加し、位置・幅・高さを設定してフィットを実行します。調整ボタンから固定値、上下限、擬VoigtのL比を編集できます。</li>
+        <li>残差と成分を確認し、CSVまたはPlot Launcherの編集用プロジェクトを保存します。</li>
+      </ol>
+      <p>擬Voigtは同じFWHMのGaussianとLorentzianの高さの加重和です。面積は各成分の全域積分、残差は測定値−合成曲線です。</p>
+      <ul class="reference-list">
+        <li><a href="https://casaxps.com/pdfs/CasaXPSCookbook2026.pdf" target="_blank" rel="noopener noreferrer">CasaXPS Cookbook</a></li>
+        <li><a href="https://www.kolibrik.net/en/solutions-products/kolxpd/manuals/fitting-independent-parameters" target="_blank" rel="noopener noreferrer">KolXPD フィットチュートリアル</a></li>
+        <li><a href="https://khervetools.com/docs/" target="_blank" rel="noopener noreferrer">KherveFitting マニュアル</a></li>
+        <li><a href="https://www.sasj.jp/JSA/CONTENTS/vol.24_1/Vol.24%20No.1/Vol.24%20No.1_02_Yoshihara.pdf" target="_blank" rel="noopener noreferrer">COMPRO12の使用法（1）</a></li>
+      </ul>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
