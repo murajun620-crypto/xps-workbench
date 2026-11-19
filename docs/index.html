@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="xps-version" content="1.4.0">
-    <meta name="xps-build" content="bae3315efa83">
+    <meta name="xps-version" content="1.5.0">
+    <meta name="xps-build" content="70fe5373ec14">
     <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
@@ -111,6 +111,8 @@ label, .range-title { display: block; font-size: .875rem; font-weight: 620; colo
 .field-row { align-items: end; gap: 7px; }
 .field-row > label { min-width: 0; flex: 1; }
 .reference-actions { margin-top: 8px; justify-content: space-between; }
+.shift-actions { margin-top: 8px; align-items: center; justify-content: space-between; }
+.shift-actions .section-note { margin-top: 0; }
 .unit-input { position: relative; flex: 1; min-width: 0; }
 label .unit-input { margin-top: 4px; }
 .unit-input input { padding-right: 26px; }
@@ -350,7 +352,7 @@ td .number-input {
               <p class="kicker">SPECTRUM</p>
               <h2 id="chart-title">Spectrum</h2>
               <p id="spectrum-meta" class="muted chart-meta"></p>
-              <div id="region-wrap" class="region" hidden><label for="region">Region</label><select id="region"></select></div>
+              <div id="region-wrap" class="region" hidden><label for="region">Spectrum</label><select id="region"></select></div>
             </div>
             <div class="chart-actions">
               <div class="segmented" aria-label="Spectrum display">
@@ -395,7 +397,10 @@ td .number-input {
                 <button type="submit" class="button field-button">Apply</button>
               </div>
             </form>
-            <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
+            <div class="field-row shift-actions">
+              <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
+              <button id="export-shifted-csv" class="button" type="button" title="Export all shifted energies and measured intensities"><span data-icon="download"></span>Shifted CSV</button>
+            </div>
           </div>
           <div class="settings-section">
             <div class="section-heading"><span class="section-icon" data-icon="layers"></span><h3>Background</h3></div>
@@ -472,8 +477,8 @@ td .number-input {
     <dialog id="help-dialog" aria-labelledby="help-title">
       <div class="dialog-head"><h2 id="help-title">Help</h2><button type="button" data-close="help-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
       <ol class="help-list">
-        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS spectrum. Use Region to choose a measurement or Excel sheet.</li>
-        <li>Enter an energy offset, or enter the measured and reference energies of a known peak.</li>
+        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS file. Use Spectrum to switch between measurements. Each spectrum keeps its own shift and fit settings while the file is open.</li>
+        <li>Enter an energy offset, or enter the measured and reference energies of a known peak. Shifted CSV exports the selected spectrum's shifted energy and measured intensity over the full range.</li>
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
@@ -3839,19 +3844,7 @@ function numericTables(rows, { decimalComma, spreadsheet = false }) {
   let columns = null;
   let active = null;
   for (const { fields: fields2, comment, rowNumber } of rows) {
-    if (spreadsheet && columns && !active) {
-      const unit = fields2[columns.x]?.normalize("NFKC").match(/^\s*[(\[]?\s*([mk]?eV)\s*[)\]]?\s*$/i)?.[1];
-      if (unit) {
-        const signal = fields2[columns.y];
-        columns = {
-          ...columns,
-          xLabel: `${columns.xLabel} ${unit}`,
-          yLabel: signal && intensityUnit(signal) ? signal : columns.yLabel
-        };
-        continue;
-      }
-    }
-    const header = fields2.length > 1 ? namedColumns(fields2) : null;
+    const header = !spreadsheet && fields2.length > 1 ? namedColumns(fields2) : null;
     if (header) {
       columns = header;
       if (!spreadsheet) columns.analysis = findCsvAnalysisColumns(fields2);
@@ -3917,18 +3910,193 @@ function parseDelimited(text, filename) {
   }
   return tableToSpectrum(best, filename);
 }
+var ENERGY_UNIT = /^\s*[(\[]?\s*([mk]?eV)\s*[)\]]?\s*$/i;
+var ENERGY_LABEL = /^(?:(?:photoelectron|electron|analyzer|corrected|calibrated)\s+)?(?:(?:binding|kinetic)\s*)?energ(?:y|ies)(?:\s*\d+)?$|^(?:(?:結合|運動)\s*)?エネルギー(?:\s*\d+)?$/i;
+var AXIS_LABEL = /^(?:[bk]\.?\s*e\.?|e\s*[bk]|[mk]?ev|x|abscissa)(?:\s*\d+)?$/i;
+var SIGNAL_LABEL = /intensity|counts?|\bcps\b|signal|\b(?:raw|measured|observed|experiment(?:al)?)\b|強度|実測|^(?:y|ordinate)(?:\s*\d+)?$/i;
+var SUMMARY_LABEL = /^(?:(?:grand\s+)?totals?|sum|average|summary)\s*:?$/i;
+var AUXILIARY_LABELS = /* @__PURE__ */ new Set([
+  "#",
+  "index",
+  "no",
+  "no.",
+  "date",
+  "timestamp",
+  "time",
+  "dwell",
+  "scan",
+  "energy offset",
+  "energy shift",
+  "energy step",
+  "step size",
+  "comment",
+  "comments",
+  "note",
+  "notes",
+  "background",
+  "residual",
+  "residuals",
+  "model",
+  "synthesize",
+  "fit",
+  "total fit",
+  "fitted intensity",
+  "calculated intensity",
+  "background-subtracted intensity",
+  "background subtracted intensity",
+  "\u5099\u8003",
+  "\u6E2C\u5B9A\u6642\u9593",
+  "\u7D4C\u904E\u6642\u9593",
+  "\u756A\u53F7"
+]);
+function worksheetAxes(fields2) {
+  const axes = [];
+  for (const key of Object.keys(fields2)) {
+    const x = Number(key);
+    const label = fields2[x].normalize("NFKC").replaceAll("_", " ").trim();
+    const heading = label.replace(/(?:\s*[([,:/]\s*|\s+)[mk]?ev\s*[)\]]?$/i, "");
+    if (ENERGY_LABEL.test(heading) || AXIS_LABEL.test(heading)) {
+      const scale = /^e\s*([bk])\b/i.exec(heading)?.[1]?.toLowerCase();
+      const xLabel = scale === "k" ? `Kinetic ${label}` : scale === "b" ? `Binding ${label}` : label;
+      axes.push({ x, xLabel, rows: [] });
+    }
+  }
+  if (axes.length === 1 && /^abscissa\b/i.test(fields2[0]) && /^ordinate\b/i.test(fields2[1])) {
+    axes[0].xLabel = namedColumns(fields2).xLabel;
+  }
+  return axes;
+}
+function worksheetAuxiliaryColumn(label) {
+  const heading = label.replace(/\s*[(\[].*$/, "").trim().toLowerCase();
+  return AUXILIARY_LABELS.has(heading) || /^(?:(?:data\s*)?point|row|channel)(?:\s+(?:no\.?|number|index|id))?$/.test(heading) || /^(?:sample|scan|spectrum|step)\s+(?:no\.?|number|index|id)$/.test(heading) || /^(?:dwell|acquisition|integration|elapsed)\s+time$/.test(heading) || /^(?:pass|excitation|photon|source|original(?:\s+(?:binding|kinetic))?)\s+energy$/.test(heading) || /^peak\s+\d+(?:\s+-\s+.+)?$/.test(heading) || /^doublet\s+\d+\s+\S+(?:\s+-\s+.+)?$/.test(heading);
+}
+function columnAddress(index) {
+  let address = "";
+  for (let column = index + 1; column > 0; column = Math.floor((column - 1) / 26)) {
+    address = String.fromCharCode(65 + (column - 1) % 26) + address;
+  }
+  return address;
+}
+function worksheetSignalColumn({ fields: fields2, rowNumber, units, axes }, axis, y) {
+  const label = fields2[y]?.trim() ?? "";
+  const normalized = label.normalize("NFKC").replaceAll("_", " ");
+  const explicit = SIGNAL_LABEL.test(normalized);
+  if (y === axis.x || y < axis.x && (axes.length > 1 || !explicit) || worksheetAuxiliaryColumn(normalized)) return null;
+  const energyUnit = units?.[axis.x]?.normalize("NFKC").match(ENERGY_UNIT)?.[1];
+  const signalUnit = units?.[y] ? intensityUnit(units[y]) : "";
+  const column = columnAddress(y);
+  return {
+    axis,
+    columns: {
+      xLabel: energyUnit ? `${axis.xLabel} ${energyUnit}` : axis.xLabel,
+      yLabel: signalUnit || label
+    },
+    label: label || `Column ${column}`,
+    address: `${column}${rowNumber}`,
+    explicit,
+    pairs: [],
+    observed: 0,
+    firstEnergyPoint: null,
+    nextEnergyPoint: null
+  };
+}
+function worksheetSectionTables(section) {
+  const { axes, rows } = section;
+  const axesByColumn = new Map(axes.map((axis) => [axis.x, axis]));
+  const series = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const keys = Object.keys(row.fields);
+    for (const key of keys) {
+      const x = Number(key);
+      const axis = axesByColumn.get(x);
+      if (!axis) continue;
+      const value = asNumber(row.fields[x], true);
+      if (Number.isFinite(value)) {
+        axis.value = value;
+        axis.rows.push(row.rowNumber);
+      }
+    }
+    let axisIndex = 0;
+    for (const key of keys) {
+      const y = Number(key);
+      while (axes[axisIndex + 1]?.x <= y) axisIndex++;
+      const axis = axes[axisIndex];
+      if (!series.has(y)) series.set(y, worksheetSignalColumn(section, axis, y));
+      const table = series.get(y);
+      if (!table) continue;
+      const intensity = asNumber(row.fields[y], true);
+      const hasEnergy = axis.rows.at(-1) === row.rowNumber;
+      if (!hasEnergy && SUMMARY_LABEL.test(row.fields[axis.x]?.trim() || "")) continue;
+      if (!hasEnergy && !Number.isFinite(intensity)) continue;
+      table.observed++;
+      if (hasEnergy) {
+        const energyPoint = axis.rows.length - 1;
+        table.firstEnergyPoint ??= energyPoint;
+        if (table.nextEnergyPoint !== null && table.nextEnergyPoint < energyPoint) {
+          table.invalidRow ??= axis.rows[table.nextEnergyPoint];
+        }
+        table.nextEnergyPoint = energyPoint + 1;
+      }
+      if (hasEnergy && Number.isFinite(intensity)) {
+        table.pairs.push([axis.value, intensity]);
+      } else {
+        table.invalidRow ??= row.rowNumber;
+      }
+    }
+  }
+  const candidates = [...series.entries()].filter(([, table]) => table && (table.observed >= MIN_POINTS || table.pairs.length === MIN_POINTS - 1 || table.explicit && table.observed > 0 && table.axis.rows.length > 0)).sort(([left], [right]) => left - right).map(([, table]) => table);
+  const spectrumCounts = /* @__PURE__ */ new Map();
+  for (const { axis } of candidates) spectrumCounts.set(axis, (spectrumCounts.get(axis) ?? 0) + 1);
+  for (const table of candidates) {
+    if (spectrumCounts.get(table.axis) > 1) continue;
+    if (table.firstEnergyPoint > 0) table.invalidRow = table.axis.rows[0];
+    table.invalidRow ??= table.axis.rows[table.nextEnergyPoint ?? 0];
+  }
+  return candidates;
+}
+function worksheetSpectra(rows, filename, sheetName) {
+  const tables = [];
+  const fallbackRows = [];
+  let section;
+  for (const row of rows) {
+    if (!tables.length) fallbackRows.push(row);
+    if (section && !section.units && !section.rows.length && section.axes.some(({ x }) => ENERGY_UNIT.test(row.fields[x]?.normalize("NFKC") || ""))) {
+      section.units = row.fields;
+      continue;
+    }
+    const axes = worksheetAxes(row.fields);
+    if (axes.length) {
+      if (section) tables.push(...worksheetSectionTables(section));
+      section = { ...row, axes, rows: [] };
+    } else if (section) {
+      section.rows.push(row);
+    }
+  }
+  if (section) tables.push(...worksheetSectionTables(section));
+  if (!tables.length) {
+    const table = numericTables(fallbackRows, { decimalComma: true, spreadsheet: true }).reduce((best, next) => !best || next.pairs.length > best.pairs.length ? next : best, null);
+    if (table) tables.push(table);
+  }
+  const labelCounts = /* @__PURE__ */ new Map();
+  for (const { label } of tables) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  return tables.map((table) => {
+    const suffix = labelCounts.get(table.label) > 1 ? ` (${table.address})` : "";
+    const name = tables.length > 1 ? `${sheetName} \u2014 ${table.label}${suffix}` : sheetName;
+    try {
+      return tableToSpectrum(table, filename, name);
+    } catch (error) {
+      throw new Error(`Spectrum "${name}". ${error.message}`);
+    }
+  });
+}
 async function parseXlsx(bytes, filename) {
   const regions = [];
   let invalidSheet;
   for await (const { name, rows } of xlsxWorksheets(bytes)) {
-    const tables = numericTables(rows, { decimalComma: true, spreadsheet: true });
-    const candidates = tables.some((table2) => table2.columns) ? tables.filter((table2) => table2.columns) : tables;
-    const table = candidates.reduce((best, next) => !best || next.pairs.length > best.pairs.length ? next : best, null);
-    if (!table) continue;
     try {
-      regions.push(tableToSpectrum(table, filename, name));
+      for (const spectrum of worksheetSpectra(rows, filename, name)) regions.push(spectrum);
     } catch (error) {
-      invalidSheet ??= new Error(`Sheet "${name}". ${error.message}`);
+      invalidSheet ??= error;
     }
   }
   if (regions.length) return { ...regions[0], regions };
@@ -5015,11 +5183,9 @@ var spectrumFileType = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
   }
 };
-function emptyProject() {
+function emptyAnalysis() {
   return {
     spectrum: null,
-    dataset: null,
-    sourceHandle: null,
     points: [],
     original: [],
     offset: 0,
@@ -5028,7 +5194,6 @@ function emptyProject() {
     method: "shirley",
     view: "raw",
     shiftMode: "direct",
-    pick: null,
     peaks: [],
     nextId: 0,
     result: null,
@@ -5037,6 +5202,17 @@ function emptyProject() {
     section: [],
     start: 0,
     disabledSeries: /* @__PURE__ */ new Set()
+  };
+}
+var analysisFields = Object.keys(emptyAnalysis());
+function emptyProject() {
+  return {
+    ...emptyAnalysis(),
+    dataset: null,
+    sourceHandle: null,
+    activeRegion: null,
+    sessions: /* @__PURE__ */ new Map(),
+    pick: null
   };
 }
 var state = { ...emptyProject(), revision: 0, fitting: false };
@@ -5227,10 +5403,8 @@ function resetProject() {
   renderFit();
   drawChart(null);
 }
-function assignSpectrum(spectrum) {
-  peakDrag = void 0;
-  invalidate();
-  notice();
+function initializeSpectrum(spectrum) {
+  Object.assign(state, emptyAnalysis());
   state.spectrum = spectrum;
   state.points = spectrum.x.map((x, index) => ({ x, y: spectrum.y[index] }));
   const saved = spectrum.analysis;
@@ -5242,21 +5416,40 @@ function assignSpectrum(spectrum) {
   state.range = spectrum.range || savedRange(saved);
   if (saved) state.method = saved.metadata?.method || (saved.background ? "shirley" : "none");
   state.zoom = rangeOf(state.points);
-  state.pick = null;
-  state.view = "raw";
-  state.shiftMode = "direct";
-  state.disabledSeries.clear();
-  state.nextId = 0;
   state.peaks = (spectrum.peaks || []).map(buildPeak);
-  byId("plot-coordinates").textContent = "";
-  byId("observed").value = "";
-  byId("target").value = "";
   recalculate();
   if (saved) restoreAnalysis(saved);
   if (!state.peaks.length && !saved?.metadata) {
     state.peaks = [buildPeak(estimatePeak(state.section, state.background.values))];
     updatePreview();
   }
+}
+function selectSpectrum(index) {
+  const spectrum = state.dataset?.regions?.[index] ?? (index === 0 ? state.dataset : null);
+  if (!spectrum || index === state.activeRegion) return;
+  const referenceInputs = ["observed", "target"].map(byId);
+  if (state.activeRegion !== null) {
+    state.sessions.set(state.activeRegion, {
+      analysis: Object.fromEntries(analysisFields.map((field) => [field, state[field]])),
+      reference: referenceInputs.map((input) => input.value)
+    });
+  }
+  peakDrag = void 0;
+  invalidate();
+  drawChart(null);
+  const constraints = byId("peak-dialog");
+  if (constraints.open) constraints.close();
+  constraintPeakId = void 0;
+  state.pick = null;
+  notice();
+  const saved = state.sessions.get(index);
+  if (saved) Object.assign(state, saved.analysis);
+  else initializeSpectrum(spectrum);
+  state.activeRegion = index;
+  byId("plot-coordinates").textContent = "";
+  referenceInputs.forEach((input, i) => {
+    input.value = saved?.reference[i] ?? "";
+  });
   syncControls();
   showAnalysis(true);
   render();
@@ -5264,11 +5457,13 @@ function assignSpectrum(spectrum) {
 function loadDataset(dataset, sourceHandle = null) {
   state.dataset = dataset;
   state.sourceHandle = sourceHandle;
+  state.activeRegion = null;
+  state.sessions.clear();
   const regions = dataset.regions || [];
   const select = byId("region");
   select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
   byId("region-wrap").hidden = regions.length < 2;
-  assignSpectrum(regions[0] || dataset);
+  selectSpectrum(0);
 }
 function syncControls() {
   byId("offset").value = state.offset;
@@ -5789,15 +5984,17 @@ function runFit() {
 }
 var exportFormats = {
   csv: { description: "Spectrum CSV", extension: ".csv", mime: "text/csv" },
+  shiftedCsv: { description: "Shifted spectrum CSV", extension: ".csv", mime: "text/csv", suffix: "-shifted" },
   plotproject: { description: "Plot Launcher XPS Fit project", extension: ".plotproject", mime: "application/json" },
-  xpsFitCsv: { description: "Plot Launcher XPS Fit CSV", extension: ".csv", mime: "text/csv" }
+  xpsFitCsv: { description: "Plot Launcher XPS Fit CSV", extension: ".csv", mime: "text/csv", suffix: "-xps-fit" }
 };
 function exportPayload(project, format, name) {
-  const { result, spectrum: { energyScale, y, yUnit }, method, peaks } = project;
+  const { result, spectrum: { energyScale, xUnit, y, yUnit }, method, peaks } = project;
+  const x = project.points.map((point) => point.x);
+  if (format === "shiftedCsv") return spectrumToCsv({ x, y, xUnit, yUnit, energyScale });
   const forPlotLauncher = format !== "csv";
   const model = result ?? (forPlotLauncher && peaks.length ? project.preview : null);
   const originalX = project.original.map((point) => point.x);
-  const x = project.points.map((point) => point.x);
   const { values: baseline } = project.background;
   const align = (values) => sparseAligned(values, null, project);
   const corrected = align(project.section.map((point, i) => point.y - baseline[i]));
@@ -5864,12 +6061,12 @@ function downloadBlob(blob, filename) {
 async function exportData(format) {
   if (!state.spectrum) return;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
-  const { dataset, spectrum, sourceHandle } = project;
+  const { dataset, spectrum, sourceHandle, activeRegion } = project;
   const stem = englishExportFilename(spectrum.filename || spectrum.name);
-  const region = dataset.regions?.length > 1 ? `-${englishExportFilename(spectrum.name, `region-${Number(byId("region").value) + 1}`)}` : "";
-  const suffix = format === "xpsFitCsv" ? "-xps-fit" : "-xps";
-  const name = (stem + region).slice(0, 120 - suffix.length) + suffix;
-  const { extension, mime, description } = exportFormats[format];
+  const { extension, mime, description, suffix = "-xps" } = exportFormats[format];
+  const prefix = dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : "";
+  const label = prefix ? englishExportFilename(spectrum.name, "spectrum") : stem;
+  const name = prefix + label.slice(0, 120 - prefix.length - suffix.length) + suffix;
   const filename = name + extension;
   try {
     let destination;
@@ -6073,7 +6270,7 @@ byId("demo").addEventListener("click", () => {
   loadDataset(demoSpectrum());
   runFit();
 });
-byId("region").addEventListener("change", (event) => assignSpectrum(state.dataset.regions[event.target.value]));
+byId("region").addEventListener("change", (event) => selectSpectrum(event.target.selectedIndex));
 byId("direct-form").addEventListener("submit", (event) => {
   event.preventDefault();
   applyShift(byId("offset").valueAsNumber);
@@ -6181,6 +6378,7 @@ byId("peak-form").addEventListener("input", () => {
   for (const input of byId("peak-form").querySelectorAll("input")) input.setCustomValidity("");
 });
 byId("export-csv").addEventListener("click", () => exportData("csv"));
+byId("export-shifted-csv").addEventListener("click", () => exportData("shiftedCsv"));
 byId("export-plot").addEventListener("click", () => exportData("plotproject"));
 byId("export-plot-csv").addEventListener("click", () => exportData("xpsFitCsv"));
 byId("show-help").addEventListener("click", () => byId("help-dialog").showModal());

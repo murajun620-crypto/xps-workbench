@@ -56,12 +56,18 @@ const spectrumFileType = {
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   },
 };
+function emptyAnalysis() {
+  return {
+    spectrum: null, points: [], original: [], offset: 0,
+    range: [], zoom: [], method: 'shirley',
+    view: 'raw', shiftMode: 'direct', peaks: [], nextId: 0, result: null, preview: null,
+    background: null, section: [], start: 0, disabledSeries: new Set(),
+  };
+}
+const analysisFields = Object.keys(emptyAnalysis());
 function emptyProject() {
   return {
-    spectrum: null, dataset: null, sourceHandle: null, points: [], original: [], offset: 0,
-    range: [], zoom: [], method: 'shirley',
-    view: 'raw', shiftMode: 'direct', pick: null, peaks: [], nextId: 0, result: null, preview: null,
-    background: null, section: [], start: 0, disabledSeries: new Set(),
+    ...emptyAnalysis(), dataset: null, sourceHandle: null, activeRegion: null, sessions: new Map(), pick: null,
   };
 }
 const state = { ...emptyProject(), revision: 0, fitting: false };
@@ -272,10 +278,8 @@ function resetProject() {
   drawChart(null);
 }
 
-function assignSpectrum(spectrum) {
-  peakDrag = undefined;
-  invalidate();
-  notice();
+function initializeSpectrum(spectrum) {
+  Object.assign(state, emptyAnalysis());
   state.spectrum = spectrum;
   state.points = spectrum.x.map((x, index) => ({ x, y: spectrum.y[index] }));
   const saved = spectrum.analysis;
@@ -286,21 +290,41 @@ function assignSpectrum(spectrum) {
   state.range = spectrum.range || savedRange(saved);
   if (saved) state.method = saved.metadata?.method || (saved.background ? 'shirley' : 'none');
   state.zoom = rangeOf(state.points);
-  state.pick = null;
-  state.view = 'raw';
-  state.shiftMode = 'direct';
-  state.disabledSeries.clear();
-  state.nextId = 0;
   state.peaks = (spectrum.peaks || []).map(buildPeak);
-  byId('plot-coordinates').textContent = '';
-  byId('observed').value = '';
-  byId('target').value = '';
   recalculate();
   if (saved) restoreAnalysis(saved);
   if (!state.peaks.length && !saved?.metadata) {
     state.peaks = [buildPeak(estimatePeak(state.section, state.background.values))];
     updatePreview();
   }
+}
+
+function selectSpectrum(index) {
+  const spectrum = state.dataset?.regions?.[index] ?? (index === 0 ? state.dataset : null);
+  if (!spectrum || index === state.activeRegion) return;
+
+  const referenceInputs = ['observed', 'target'].map(byId);
+  if (state.activeRegion !== null) {
+    state.sessions.set(state.activeRegion, {
+      analysis: Object.fromEntries(analysisFields.map((field) => [field, state[field]])),
+      reference: referenceInputs.map((input) => input.value),
+    });
+  }
+  peakDrag = undefined;
+  invalidate();
+  drawChart(null);
+  const constraints = byId('peak-dialog');
+  if (constraints.open) constraints.close();
+  constraintPeakId = undefined;
+  state.pick = null;
+  notice();
+
+  const saved = state.sessions.get(index);
+  if (saved) Object.assign(state, saved.analysis);
+  else initializeSpectrum(spectrum);
+  state.activeRegion = index;
+  byId('plot-coordinates').textContent = '';
+  referenceInputs.forEach((input, i) => { input.value = saved?.reference[i] ?? ''; });
   syncControls();
   showAnalysis(true);
   render();
@@ -309,11 +333,13 @@ function assignSpectrum(spectrum) {
 function loadDataset(dataset, sourceHandle = null) {
   state.dataset = dataset;
   state.sourceHandle = sourceHandle;
+  state.activeRegion = null;
+  state.sessions.clear();
   const regions = dataset.regions || [];
   const select = byId('region');
   select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
   byId('region-wrap').hidden = regions.length < 2;
-  assignSpectrum(regions[0] || dataset);
+  selectSpectrum(0);
 }
 
 function syncControls() {
@@ -829,16 +855,18 @@ function runFit() {
 
 const exportFormats = {
   csv: { description: 'Spectrum CSV', extension: '.csv', mime: 'text/csv' },
+  shiftedCsv: { description: 'Shifted spectrum CSV', extension: '.csv', mime: 'text/csv', suffix: '-shifted' },
   plotproject: { description: 'Plot Launcher XPS Fit project', extension: '.plotproject', mime: 'application/json' },
-  xpsFitCsv: { description: 'Plot Launcher XPS Fit CSV', extension: '.csv', mime: 'text/csv' },
+  xpsFitCsv: { description: 'Plot Launcher XPS Fit CSV', extension: '.csv', mime: 'text/csv', suffix: '-xps-fit' },
 };
 
 function exportPayload(project, format, name) {
-  const { result, spectrum: { energyScale, y, yUnit }, method, peaks } = project;
+  const { result, spectrum: { energyScale, xUnit, y, yUnit }, method, peaks } = project;
+  const x = project.points.map((point) => point.x);
+  if (format === 'shiftedCsv') return spectrumToCsv({ x, y, xUnit, yUnit, energyScale });
   const forPlotLauncher = format !== 'csv';
   const model = result ?? (forPlotLauncher && peaks.length ? project.preview : null);
   const originalX = project.original.map((point) => point.x);
-  const x = project.points.map((point) => point.x);
   const { values: baseline } = project.background;
   const align = (values) => sparseAligned(values, null, project);
   const corrected = align(project.section.map((point, i) => point.y - baseline[i]));
@@ -900,13 +928,12 @@ function downloadBlob(blob, filename) {
 async function exportData(format) {
   if (!state.spectrum) return;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
-  const { dataset, spectrum, sourceHandle } = project;
+  const { dataset, spectrum, sourceHandle, activeRegion } = project;
   const stem = englishExportFilename(spectrum.filename || spectrum.name);
-  const region = dataset.regions?.length > 1
-    ? `-${englishExportFilename(spectrum.name, `region-${Number(byId('region').value) + 1}`)}` : '';
-  const suffix = format === 'xpsFitCsv' ? '-xps-fit' : '-xps';
-  const name = (stem + region).slice(0, 120 - suffix.length) + suffix;
-  const { extension, mime, description } = exportFormats[format];
+  const { extension, mime, description, suffix = '-xps' } = exportFormats[format];
+  const prefix = dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : '';
+  const label = prefix ? englishExportFilename(spectrum.name, 'spectrum') : stem;
+  const name = prefix + label.slice(0, 120 - prefix.length - suffix.length) + suffix;
   const filename = name + extension;
 
   try {
@@ -1113,7 +1140,7 @@ byId('demo').addEventListener('click', () => {
   loadDataset(demoSpectrum());
   runFit();
 });
-byId('region').addEventListener('change', (event) => assignSpectrum(state.dataset.regions[event.target.value]));
+byId('region').addEventListener('change', (event) => selectSpectrum(event.target.selectedIndex));
 byId('direct-form').addEventListener('submit', (event) => {
   event.preventDefault();
   applyShift(byId('offset').valueAsNumber);
@@ -1222,6 +1249,7 @@ byId('peak-form').addEventListener('input', () => {
   for (const input of byId('peak-form').querySelectorAll('input')) input.setCustomValidity('');
 });
 byId('export-csv').addEventListener('click', () => exportData('csv'));
+byId('export-shifted-csv').addEventListener('click', () => exportData('shiftedCsv'));
 byId('export-plot').addEventListener('click', () => exportData('plotproject'));
 byId('export-plot-csv').addEventListener('click', () => exportData('xpsFitCsv'));
 byId('show-help').addEventListener('click', () => byId('help-dialog').showModal());

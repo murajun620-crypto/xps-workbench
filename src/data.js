@@ -146,19 +146,7 @@ function numericTables(rows, { decimalComma, spreadsheet = false }) {
   let columns = null;
   let active = null;
   for (const { fields, comment, rowNumber } of rows) {
-    if (spreadsheet && columns && !active) {
-      const unit = fields[columns.x]?.normalize('NFKC').match(/^\s*[(\[]?\s*([mk]?eV)\s*[)\]]?\s*$/i)?.[1];
-      if (unit) {
-        const signal = fields[columns.y];
-        columns = {
-          ...columns,
-          xLabel: `${columns.xLabel} ${unit}`,
-          yLabel: signal && intensityUnit(signal) ? signal : columns.yLabel,
-        };
-        continue;
-      }
-    }
-    const header = fields.length > 1 ? namedColumns(fields) : null;
+    const header = !spreadsheet && fields.length > 1 ? namedColumns(fields) : null;
     if (header) {
       columns = header;
       if (!spreadsheet) columns.analysis = findCsvAnalysisColumns(fields);
@@ -235,18 +223,184 @@ function parseDelimited(text, filename) {
   return tableToSpectrum(best, filename);
 }
 
+const ENERGY_UNIT = /^\s*[(\[]?\s*([mk]?eV)\s*[)\]]?\s*$/i;
+const ENERGY_LABEL = /^(?:(?:photoelectron|electron|analyzer|corrected|calibrated)\s+)?(?:(?:binding|kinetic)\s*)?energ(?:y|ies)(?:\s*\d+)?$|^(?:(?:結合|運動)\s*)?エネルギー(?:\s*\d+)?$/i;
+const AXIS_LABEL = /^(?:[bk]\.?\s*e\.?|e\s*[bk]|[mk]?ev|x|abscissa)(?:\s*\d+)?$/i;
+const SIGNAL_LABEL = /intensity|counts?|\bcps\b|signal|\b(?:raw|measured|observed|experiment(?:al)?)\b|強度|実測|^(?:y|ordinate)(?:\s*\d+)?$/i;
+const SUMMARY_LABEL = /^(?:(?:grand\s+)?totals?|sum|average|summary)\s*:?$/i;
+const AUXILIARY_LABELS = new Set([
+  '#', 'index', 'no', 'no.', 'date', 'timestamp', 'time', 'dwell', 'scan',
+  'energy offset', 'energy shift', 'energy step', 'step size',
+  'comment', 'comments', 'note', 'notes', 'background', 'residual', 'residuals', 'model',
+  'synthesize', 'fit', 'total fit', 'fitted intensity', 'calculated intensity', 'background-subtracted intensity',
+  'background subtracted intensity', '備考', '測定時間', '経過時間', '番号',
+]);
+
+function worksheetAxes(fields) {
+  const axes = [];
+  for (const key of Object.keys(fields)) {
+    const x = Number(key);
+    const label = fields[x].normalize('NFKC').replaceAll('_', ' ').trim();
+    const heading = label.replace(/(?:\s*[([,:/]\s*|\s+)[mk]?ev\s*[)\]]?$/i, '');
+    if (ENERGY_LABEL.test(heading) || AXIS_LABEL.test(heading)) {
+      const scale = /^e\s*([bk])\b/i.exec(heading)?.[1]?.toLowerCase();
+      const xLabel = scale === 'k' ? `Kinetic ${label}` : scale === 'b' ? `Binding ${label}` : label;
+      axes.push({ x, xLabel, rows: [] });
+    }
+  }
+  if (axes.length === 1 && /^abscissa\b/i.test(fields[0]) && /^ordinate\b/i.test(fields[1])) {
+    axes[0].xLabel = namedColumns(fields).xLabel;
+  }
+  return axes;
+}
+
+function worksheetAuxiliaryColumn(label) {
+  const heading = label.replace(/\s*[(\[].*$/, '').trim().toLowerCase();
+  return AUXILIARY_LABELS.has(heading) ||
+    /^(?:(?:data\s*)?point|row|channel)(?:\s+(?:no\.?|number|index|id))?$/.test(heading) ||
+    /^(?:sample|scan|spectrum|step)\s+(?:no\.?|number|index|id)$/.test(heading) ||
+    /^(?:dwell|acquisition|integration|elapsed)\s+time$/.test(heading) ||
+    /^(?:pass|excitation|photon|source|original(?:\s+(?:binding|kinetic))?)\s+energy$/.test(heading) ||
+    /^peak\s+\d+(?:\s+-\s+.+)?$/.test(heading) ||
+    /^doublet\s+\d+\s+\S+(?:\s+-\s+.+)?$/.test(heading);
+}
+
+function columnAddress(index) {
+  let address = '';
+  for (let column = index + 1; column > 0; column = Math.floor((column - 1) / 26)) {
+    address = String.fromCharCode(65 + (column - 1) % 26) + address;
+  }
+  return address;
+}
+
+function worksheetSignalColumn({ fields, rowNumber, units, axes }, axis, y) {
+  const label = fields[y]?.trim() ?? '';
+  const normalized = label.normalize('NFKC').replaceAll('_', ' ');
+  const explicit = SIGNAL_LABEL.test(normalized);
+  if (y === axis.x || (y < axis.x && (axes.length > 1 || !explicit)) || worksheetAuxiliaryColumn(normalized)) return null;
+  const energyUnit = units?.[axis.x]?.normalize('NFKC').match(ENERGY_UNIT)?.[1];
+  const signalUnit = units?.[y] ? intensityUnit(units[y]) : '';
+  const column = columnAddress(y);
+  return {
+    axis,
+    columns: {
+      xLabel: energyUnit ? `${axis.xLabel} ${energyUnit}` : axis.xLabel,
+      yLabel: signalUnit || label,
+    },
+    label: label || `Column ${column}`,
+    address: `${column}${rowNumber}`,
+    explicit,
+    pairs: [],
+    observed: 0,
+    firstEnergyPoint: null,
+    nextEnergyPoint: null,
+  };
+}
+
+function worksheetSectionTables(section) {
+  const { axes, rows } = section;
+  const axesByColumn = new Map(axes.map(axis => [axis.x, axis]));
+  const series = new Map();
+  for (const row of rows) {
+    const keys = Object.keys(row.fields);
+    for (const key of keys) {
+      const x = Number(key);
+      const axis = axesByColumn.get(x);
+      if (!axis) continue;
+      const value = asNumber(row.fields[x], true);
+      if (Number.isFinite(value)) {
+        axis.value = value;
+        axis.rows.push(row.rowNumber);
+      }
+    }
+    let axisIndex = 0;
+    for (const key of keys) {
+      const y = Number(key);
+      while (axes[axisIndex + 1]?.x <= y) axisIndex++;
+      const axis = axes[axisIndex];
+      if (!series.has(y)) series.set(y, worksheetSignalColumn(section, axis, y));
+      const table = series.get(y);
+      if (!table) continue;
+      const intensity = asNumber(row.fields[y], true);
+      const hasEnergy = axis.rows.at(-1) === row.rowNumber;
+      if (!hasEnergy && SUMMARY_LABEL.test(row.fields[axis.x]?.trim() || '')) continue;
+      if (!hasEnergy && !Number.isFinite(intensity)) continue;
+      table.observed++;
+      if (hasEnergy) {
+        const energyPoint = axis.rows.length - 1;
+        table.firstEnergyPoint ??= energyPoint;
+        if (table.nextEnergyPoint !== null && table.nextEnergyPoint < energyPoint) {
+          table.invalidRow ??= axis.rows[table.nextEnergyPoint];
+        }
+        table.nextEnergyPoint = energyPoint + 1;
+      }
+      if (hasEnergy && Number.isFinite(intensity)) {
+        table.pairs.push([axis.value, intensity]);
+      } else {
+        table.invalidRow ??= row.rowNumber;
+      }
+    }
+  }
+  const candidates = [...series.entries()]
+    .filter(([, table]) => table && (table.observed >= MIN_POINTS || table.pairs.length === MIN_POINTS - 1 ||
+      (table.explicit && table.observed > 0 && table.axis.rows.length > 0)))
+    .sort(([left], [right]) => left - right).map(([, table]) => table);
+  const spectrumCounts = new Map();
+  for (const { axis } of candidates) spectrumCounts.set(axis, (spectrumCounts.get(axis) ?? 0) + 1);
+  for (const table of candidates) {
+    if (spectrumCounts.get(table.axis) > 1) continue;
+    if (table.firstEnergyPoint > 0) table.invalidRow = table.axis.rows[0];
+    table.invalidRow ??= table.axis.rows[table.nextEnergyPoint ?? 0];
+  }
+  return candidates;
+}
+
+export function worksheetSpectra(rows, filename, sheetName) {
+  const tables = [];
+  const fallbackRows = [];
+  let section;
+  for (const row of rows) {
+    if (!tables.length) fallbackRows.push(row);
+    if (section && !section.units && !section.rows.length &&
+        section.axes.some(({ x }) => ENERGY_UNIT.test(row.fields[x]?.normalize('NFKC') || ''))) {
+      section.units = row.fields;
+      continue;
+    }
+    const axes = worksheetAxes(row.fields);
+    if (axes.length) {
+      if (section) tables.push(...worksheetSectionTables(section));
+      section = { ...row, axes, rows: [] };
+    } else if (section) {
+      section.rows.push(row);
+    }
+  }
+  if (section) tables.push(...worksheetSectionTables(section));
+  if (!tables.length) {
+    const table = numericTables(fallbackRows, { decimalComma: true, spreadsheet: true })
+      .reduce((best, next) => !best || next.pairs.length > best.pairs.length ? next : best, null);
+    if (table) tables.push(table);
+  }
+  const labelCounts = new Map();
+  for (const { label } of tables) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  return tables.map((table) => {
+    const suffix = labelCounts.get(table.label) > 1 ? ` (${table.address})` : '';
+    const name = tables.length > 1 ? `${sheetName} — ${table.label}${suffix}` : sheetName;
+    try {
+      return tableToSpectrum(table, filename, name);
+    } catch (error) {
+      throw new Error(`Spectrum "${name}". ${error.message}`);
+    }
+  });
+}
+
 async function parseXlsx(bytes, filename) {
   const regions = [];
   let invalidSheet;
   for await (const { name, rows } of xlsxWorksheets(bytes)) {
-    const tables = numericTables(rows, { decimalComma: true, spreadsheet: true });
-    const candidates = tables.some((table) => table.columns) ? tables.filter((table) => table.columns) : tables;
-    const table = candidates.reduce((best, next) => !best || next.pairs.length > best.pairs.length ? next : best, null);
-    if (!table) continue;
     try {
-      regions.push(tableToSpectrum(table, filename, name));
+      for (const spectrum of worksheetSpectra(rows, filename, name)) regions.push(spectrum);
     } catch (error) {
-      invalidSheet ??= new Error(`Sheet "${name}". ${error.message}`);
+      invalidSheet ??= error;
     }
   }
   if (regions.length) return { ...regions[0], regions };

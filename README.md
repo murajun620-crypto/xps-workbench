@@ -8,8 +8,8 @@ The workspace opens empty, including after a refresh. Select Open data to start 
 
 ## Use the app
 
-1. Open a CSV, TSV, TXT, Excel (.xlsx), or ISO 14976 VAMAS spectrum. The Region menu selects a measurement region or Excel sheet when several are available. Supported VAMAS data includes NORM XPS/ESCA with regular or irregular energies, including COMPRO .npl exports.
-2. Apply a direct energy offset or align a measured peak to a reference energy.
+1. Open a CSV, TSV, TXT, Excel (.xlsx), or ISO 14976 VAMAS file. Excel measurements can be on separate sheets or share a sheet as one energy column with several intensity columns, or as separate energy and intensity column pairs. Use the Spectrum menu to switch between measurements. Each keeps its own shift, background, analysis range, and fit while the file is open. Supported VAMAS data includes NORM XPS/ESCA with regular or irregular energies, including COMPRO .npl exports.
+2. Apply a direct energy offset or align a measured peak to a reference energy. Select Shifted CSV to export all shifted energies and measured intensities of the selected spectrum. It works before peak fitting and includes points outside the analysis range.
 3. Select an analysis range and a background method. Linear and iterative Shirley use the range endpoints. If Shirley cannot converge, the app displays a Linear fallback.
 4. Add peaks and set their initial centers, widths, and heights. Drag the circle at a peak's top to adjust center and height. Drag the half-height diamond sideways to adjust FWHM. Fixed values and bounds apply to both handles. The ▲/▼ controls and the Up/Down keys adjust the numeric fields.
 5. Select Add doublet and click the primary line to add a spin-orbit pair, or enable Spin-orbit doublet in an existing peak's Constraints. Si 2p starts with a 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit either value in Constraints. The primary line has the lower binding energy and the higher kinetic energy. Its drag handles adjust the pair while preserving separation, area ratio, and shared FWHM.

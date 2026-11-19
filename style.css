@@ -99,6 +99,8 @@ label, .range-title { display: block; font-size: .875rem; font-weight: 620; colo
 .field-row { align-items: end; gap: 7px; }
 .field-row > label { min-width: 0; flex: 1; }
 .reference-actions { margin-top: 8px; justify-content: space-between; }
+.shift-actions { margin-top: 8px; align-items: center; justify-content: space-between; }
+.shift-actions .section-note { margin-top: 0; }
 .unit-input { position: relative; flex: 1; min-width: 0; }
 label .unit-input { margin-top: 4px; }
 .unit-input input { padding-right: 26px; }
