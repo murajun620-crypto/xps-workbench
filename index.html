@@ -26,8 +26,8 @@
         <div class="top-actions">
           <button id="new-project" class="button" type="button" title="Start an empty project"><span data-icon="plus"></span>New project</button>
           <button id="demo" class="quiet" type="button">Demo</button>
-          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
-          <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx" hidden>
+          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open file</button>
+          <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx,.xpsproject" hidden>
         </div>
       </div>
     </header>
@@ -38,6 +38,7 @@
           <h1>Spectrum analysis</h1>
         </div>
         <div id="workspace-exports" class="export-actions" hidden>
+          <button id="save-project" class="button" type="button" title="Save every spectrum and its analysis as an XPS Workbench project"><span data-icon="download"></span>Save project</button>
           <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
           <button id="export-plot" class="button" type="button"><span data-icon="external"></span>Plot Launcher</button>
           <button id="export-plot-csv" class="button" type="button" title="CSV for the Plot Launcher XPS Fit preset"><span data-icon="download"></span>XPS Fit CSV</button>
@@ -47,8 +48,8 @@
       <section id="empty-project" class="card project-empty" aria-labelledby="empty-title">
         <div class="empty-project-icon" data-icon="activity" aria-hidden="true"></div>
         <h2 id="empty-title">No spectrum loaded</h2>
-        <p class="muted">Open or drop a spectrum file to begin.</p>
-        <button id="empty-open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
+        <p class="muted">Open or drop a spectrum or project file.</p>
+        <button id="empty-open-file" class="button solid" type="button"><span data-icon="upload"></span>Open file</button>
       </section>
       <div id="analysis-workspace" class="layout" hidden>
         <section class="card chart-card" aria-labelledby="chart-title">
@@ -192,7 +193,8 @@
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
-        <li>Export CSV to reopen the model, components, and residuals in Workbench. Plot Launcher and XPS Fit CSV also include the residuals.</li>
+        <li>Save project stores the original measurements and analysis for every spectrum in one .xpsproject file. Use Open file to resume from that project.</li>
+        <li>Export CSV to reopen the selected spectrum and its model, components, and residuals in Workbench. Plot Launcher and XPS Fit CSV also include the residuals.</li>
       </ol>
       <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>
     </dialog>

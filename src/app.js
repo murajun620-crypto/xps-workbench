@@ -4,6 +4,7 @@ import { englishExportFilename, englishExportLabel } from './export-labels.js';
 import { installNumberInputs } from './number-input.js';
 import { MIN_PEAK_FWHM, movePeakHandle } from './peak-handles.js';
 import { PLOT_LAUNCHER_URL, toPlotLauncherFitCsv, toPlotLauncherProject } from './plot-launcher.js';
+import { MAX_PROJECT_BYTES, parseProjectFile, serializeProjectFile } from './project-file.js';
 import { restorePeakFromCurve } from './restore-peaks.js';
 import { installUpdateCheck } from './updates.js';
 import { spectraToXlsx } from './xlsx.js';
@@ -55,6 +56,7 @@ const spectrumFileType = {
   accept: {
     'text/csv': ['.csv'],
     'text/plain': ['.tsv', '.txt', '.xy', '.dat', '.vms', '.vamas', '.npl'],
+    'application/json': ['.xpsproject'],
     [xlsxMime]: ['.xlsx'],
   },
 };
@@ -70,6 +72,7 @@ const analysisFields = Object.keys(emptyAnalysis());
 function emptyProject() {
   return {
     ...emptyAnalysis(), dataset: null, sourceHandle: null, activeRegion: null, sessions: new Map(), pick: null,
+    pendingAnalyses: new Map(), projectFilename: null,
     chartScope: 'single', overlayZoom: null, overlayHidden: new Set(),
   };
 }
@@ -119,12 +122,17 @@ function buildPeak(peak) {
   return { ...peak, label: peak.label || `Peak ${id + 1}`, id };
 }
 
-function recalculate() {
-  state.start = state.points.findIndex(({ x }) => x >= state.range[0]);
-  state.section = [];
-  for (let i = state.start; i >= 0 && i < state.points.length && state.points[i].x <= state.range[1]; i++) {
-    state.section.push(state.points[i]);
+function analysisSection(points, [minimum, maximum]) {
+  const start = points.findIndex(({ x }) => x >= minimum);
+  const section = [];
+  for (let i = start; i >= 0 && i < points.length && points[i].x <= maximum; i++) {
+    section.push(points[i]);
   }
+  return { start, section };
+}
+
+function recalculate() {
+  Object.assign(state, analysisSection(state.points, state.range));
   state.background = analyzeBackground(state.section, state.method, { energyScale: state.spectrum.energyScale });
   updatePreview();
 }
@@ -302,10 +310,33 @@ function initializeSpectrum(spectrum) {
   }
 }
 
+function projectEnergies(spectrum, { offset, shiftedX }) {
+  return shiftedX ?? (offset ? spectrum.x.map((x) => x + offset) : spectrum.x);
+}
+
+function restoreProjectSession(spectrum, saved) {
+  const { shiftedX, reference, disabledSeries, result, ...settings } = saved;
+  const original = spectrum.x.map((x, i) => ({ x, y: spectrum.y[i] }));
+  const energies = projectEnergies(spectrum, { offset: settings.offset, shiftedX });
+  const points = energies === spectrum.x ? original : energies.map((x, i) => ({ x, y: spectrum.y[i] }));
+  const { start, section } = analysisSection(points, settings.range);
+  const restored = result ? { ...result, peaks: settings.peaks, ...fitStatistics(section, result.residuals) } : null;
+  const preview = restored ?? evaluateFit(section, settings.background.values, settings.peaks, { energyScale: spectrum.energyScale });
+  return {
+    analysis: {
+      ...settings, spectrum, original, points, start, section, result: restored, preview,
+      disabledSeries: new Set(disabledSeries),
+    },
+    reference,
+  };
+}
+
 function selectSpectrum(index) {
   const spectrum = state.dataset?.regions?.[index] ?? (index === 0 ? state.dataset : null);
   if (!spectrum || index === state.activeRegion) return;
 
+  const pending = state.pendingAnalyses.get(index);
+  const saved = state.sessions.get(index) ?? (pending ? restoreProjectSession(spectrum, pending) : null);
   const referenceInputs = ['observed', 'target'].map(byId);
   if (state.activeRegion !== null) {
     state.sessions.set(state.activeRegion, {
@@ -322,9 +353,9 @@ function selectSpectrum(index) {
   state.pick = null;
   notice();
 
-  const saved = state.sessions.get(index);
   if (saved) Object.assign(state, saved.analysis);
   else initializeSpectrum(spectrum);
+  state.pendingAnalyses.delete(index);
   state.activeRegion = index;
   byId('plot-coordinates').textContent = '';
   referenceInputs.forEach((input, i) => { input.value = saved?.reference[i] ?? ''; });
@@ -333,30 +364,81 @@ function selectSpectrum(index) {
   render();
 }
 
-function loadDataset(dataset, sourceHandle = null) {
+function loadDataset(dataset, sourceHandle = null, project = null, projectFilename = null) {
+  const regions = dataset.regions || [];
+  const index = project?.activeIndex ?? 0;
+  const pending = new Map();
+  project?.spectra.forEach(({ analysis }, i) => { if (analysis) pending.set(i, analysis); });
+  const initial = pending.has(index) ? restoreProjectSession(regions[index], pending.get(index)) : null;
   state.dataset = dataset;
   state.sourceHandle = sourceHandle;
   state.activeRegion = null;
   state.sessions.clear();
-  state.chartScope = 'single';
-  state.overlayZoom = null;
-  state.overlayHidden.clear();
-  const regions = dataset.regions || [];
+  if (initial) state.sessions.set(index, initial);
+  state.pendingAnalyses = pending;
+  state.projectFilename = projectFilename;
+  state.chartScope = project?.chartScope ?? 'single';
+  state.overlayZoom = project?.overlayZoom ?? null;
+  state.overlayHidden = new Set(project?.overlayHidden);
   const select = byId('region');
   select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
+  if (regions.length) select.selectedIndex = index;
   byId('region-wrap').hidden = regions.length < 2;
-  selectSpectrum(0);
+  selectSpectrum(index);
+}
+
+function loadProject(project, filename, handle) {
+  const regions = project.spectra.map(({ analysis, ...spectrum }) => ({ ...spectrum, xUnit: 'eV' }));
+  loadDataset({ name: project.name, filename: project.filename, regions }, handle, project, filename);
+}
+
+function spectrumAnalysis(index) {
+  return index === state.activeRegion ? state : state.sessions.get(index)?.analysis;
 }
 
 function shiftedSpectra() {
   return (state.dataset.regions ?? [state.dataset]).map((spectrum, index) => {
-    const points = index === state.activeRegion ? state.points : state.sessions.get(index)?.analysis.points;
+    const analysis = spectrumAnalysis(index);
+    const pending = state.pendingAnalyses.get(index);
     return {
       name: spectrum.name, energyScale: spectrum.energyScale, yUnit: spectrum.yUnit,
-      x: points ? points.map(({ x }) => x) : spectrum.x,
+      x: analysis ? analysis.points.map(({ x }) => x) : pending ? projectEnergies(spectrum, pending) : spectrum.x,
       y: spectrum.y,
     };
   });
+}
+
+function projectSnapshot() {
+  const { dataset, activeRegion, chartScope, overlayZoom, overlayHidden } = state;
+  const spectra = (dataset.regions ?? [dataset]).map((spectrum, index) => {
+    const analysis = spectrumAnalysis(index);
+    const { name, filename = '', energyScale, yUnit = '', y, sourceEnergy } = spectrum;
+    const measurement = { name, filename, energyScale, yUnit, y, sourceEnergy };
+    if (!analysis) return { ...measurement, x: spectrum.x, analysis: state.pendingAnalyses.get(index) ?? null };
+
+    const { original, points, offset, range, zoom, method, view, shiftMode, peaks, nextId, disabledSeries, background, result } = analysis;
+    const x = original.map((point) => point.x);
+    const hasDistinctShift = points.some((point, i) => point.x !== x[i] + offset);
+    const reference = index === activeRegion ? ['observed', 'target'].map((id) => byId(id).value)
+      : state.sessions.get(index).reference;
+    let savedResult = null;
+    if (result) {
+      const { fit, components, lines, residuals, status, iterations, converged } = result;
+      savedResult = { fit, components, lines, residuals, status, iterations, converged };
+    }
+    return {
+      ...measurement, x,
+      analysis: {
+        offset, range, zoom, method, view, shiftMode, nextId, background, reference,
+        peaks: peaks.map((peak) => ({ ...peak })), disabledSeries: [...disabledSeries], result: savedResult,
+        ...(hasDistinctShift ? { shiftedX: points.map((point) => point.x) } : {}),
+      },
+    };
+  });
+  return {
+    name: dataset.name, filename: dataset.filename || '', activeIndex: activeRegion,
+    chartScope, overlayZoom, overlayHidden: [...overlayHidden], spectra,
+  };
 }
 
 function changeChartScope(scope) {
@@ -924,6 +1006,7 @@ function runFit() {
 }
 
 const exportFormats = {
+  project: { description: 'XPS Workbench project', extension: '.xpsproject', mime: 'application/json', suffix: '' },
   csv: { description: 'Spectrum CSV', extension: '.csv', mime: 'text/csv' },
   shiftedCsv: { description: 'Shifted spectrum CSV', extension: '.csv', mime: 'text/csv', suffix: '-shifted' },
   shiftedXlsx: { description: 'Shifted spectra workbook', extension: '.xlsx', mime: xlsxMime, suffix: '-shifted' },
@@ -999,12 +1082,14 @@ function downloadBlob(blob, filename) {
 async function exportData(format) {
   if (!state.spectrum) return;
   const workbook = format === 'shiftedXlsx' ? shiftedSpectra() : null;
+  const savedProject = format === 'project' ? projectSnapshot() : null;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
   const { dataset, spectrum, sourceHandle, activeRegion } = project;
-  const source = workbook ? dataset : spectrum;
-  const stem = englishExportFilename(source.filename || source.name);
+  const wholeDataset = Boolean(workbook || savedProject);
+  const source = wholeDataset ? dataset : spectrum;
+  const stem = englishExportFilename((savedProject && state.projectFilename) || source.filename || source.name);
   const { extension, mime, description, suffix = '-xps' } = exportFormats[format];
-  const prefix = !workbook && dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : '';
+  const prefix = !wholeDataset && dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : '';
   const label = prefix ? englishExportFilename(spectrum.name, 'spectrum') : stem;
   const name = prefix + label.slice(0, 120 - prefix.length - suffix.length) + suffix;
   const filename = name + extension;
@@ -1024,10 +1109,12 @@ async function exportData(format) {
       }
     }
 
-    const payload = workbook ? await spectraToXlsx(workbook) : exportPayload(project, format, name);
+    const payload = savedProject ? serializeProjectFile(savedProject)
+      : workbook ? await spectraToXlsx(workbook) : exportPayload(project, format, name);
     const blob = new Blob([payload], {
       type: extension === '.csv' ? mime + ';charset=utf-8' : mime,
     });
+    if (savedProject && blob.size > MAX_PROJECT_BYTES) throw new Error('The project file is too large.');
     if (destination) {
       const writer = await destination.createWritable();
       try {
@@ -1040,7 +1127,7 @@ async function exportData(format) {
     } else {
       downloadBlob(blob, filename);
     }
-    if (state.dataset === dataset) toast(`${description} exported.`);
+    if (state.dataset === dataset) toast(savedProject ? 'Project saved.' : `${description} exported.`);
   } catch (error) {
     if (state.dataset === dataset) notice(error.message || 'Could not export the file.');
   }
@@ -1187,8 +1274,14 @@ async function open(readSource, nativePicker = false) {
   try {
     const { file, handle } = await readSource();
     if (!file || load !== fileLoad) return;
-    const spectrum = await readSpectrumFile(file);
-    if (load === fileLoad) loadDataset(spectrum, handle);
+    if (/\.xpsproject$/i.test(file.name)) {
+      if (file.size > MAX_PROJECT_BYTES) throw new Error('The project file is too large.');
+      const text = await file.text();
+      if (load === fileLoad) loadProject(parseProjectFile(text), file.name, handle);
+    } else {
+      const spectrum = await readSpectrumFile(file);
+      if (load === fileLoad) loadDataset(spectrum, handle);
+    }
   } catch (error) {
     if (load !== fileLoad || error?.name === 'AbortError') return;
     if (nativePicker && pickerUnavailable(error)) byId('file').click();
@@ -1336,6 +1429,7 @@ byId('peak-form').addEventListener('input', () => {
   for (const input of byId('peak-form').querySelectorAll('input')) input.setCustomValidity('');
 });
 byId('export-csv').addEventListener('click', () => exportData('csv'));
+byId('save-project').addEventListener('click', () => exportData('project'));
 byId('export-shifted-csv').addEventListener('click', () => exportData('shiftedCsv'));
 byId('export-shifted-xlsx').addEventListener('click', () => exportData('shiftedXlsx'));
 byId('export-plot').addEventListener('click', () => exportData('plotproject'));

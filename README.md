@@ -4,7 +4,7 @@ Calibrate energy, subtract backgrounds, and fit peaks directly in your browser.
 
 [Open XPS Workbench](https://murajun620-crypto.github.io/xps-workbench/)
 
-The workspace opens empty, including after a refresh. Select Open data to start from a spectrum, Demo for the sample, or New project to clear the current analysis.
+The workspace opens empty, including after a refresh. Select Open file to load a spectrum or resume a saved project, Demo for the sample, or New project to clear the current analysis.
 
 ## Use the app
 
@@ -14,6 +14,7 @@ The workspace opens empty, including after a refresh. Select Open data to start 
 4. Add peaks and set their initial centers, widths, and heights. Drag the circle at a peak's top to adjust center and height. Drag the half-height diamond sideways to adjust FWHM. Fixed values and bounds apply to both handles. The ▲/▼ controls and the Up/Down keys adjust the numeric fields.
 5. Select Add doublet and click the primary line to add a spin-orbit pair, or enable Spin-orbit doublet in an existing peak's Constraints. Si 2p starts with a 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit either value in Constraints. The primary line has the lower binding energy and the higher kinetic energy. Its drag handles adjust the pair while preserving separation, area ratio, and shared FWHM.
 6. The residual is measured intensity minus the current total model, and updates during manual edits. Run fit optimizes from the current settings. Workbench CSV saves both manual and optimized models with their component curves, residuals, and doublet settings. Plot Launcher and XPS Fit CSV export the displayed model and residuals using the XPS Fit preset's axis defaults.
+7. Select Save project to save an `.xpsproject` file with the original data, shifts, background settings, analysis ranges, peak settings, and fit results for every spectrum. Open the project file to resume analysis without reopening the source workbook.
 
 The version is displayed beside Check for updates. A newer release opens in a new tab so the current analysis stays open.
 

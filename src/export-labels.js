@@ -17,7 +17,7 @@ export function englishExportLabel(value, fallback = 'Series') {
 }
 
 export function englishExportFilename(value, fallback = 'spectrum') {
-  const stem = String(value ?? '').replace(/\.(csv|tsv|txt|dat|xy|xlsx|vms|vamas|npl|plotproject)$/i, '');
+  const stem = String(value ?? '').replace(/\.(csv|tsv|txt|dat|xy|xlsx|vms|vamas|npl|plotproject|xpsproject)$/i, '');
   const label = englishExportLabel(stem, fallback);
   const filename = label.replace(/[^a-z0-9._-]+/gi, '-').slice(0, 120).replace(/^[.-]+|[.-]+$/g, '');
   if (!filename) return 'spectrum';

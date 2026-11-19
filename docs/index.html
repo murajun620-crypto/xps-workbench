@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="xps-version" content="1.6.0">
-    <meta name="xps-build" content="92930c1799a0">
+    <meta name="xps-version" content="1.7.0">
+    <meta name="xps-build" content="5bd69ac09d59">
     <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
@@ -324,8 +324,8 @@ td .number-input {
         <div class="top-actions">
           <button id="new-project" class="button" type="button" title="Start an empty project"><span data-icon="plus"></span>New project</button>
           <button id="demo" class="quiet" type="button">Demo</button>
-          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
-          <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx" hidden>
+          <button id="open-file" class="button solid" type="button"><span data-icon="upload"></span>Open file</button>
+          <input id="file" type="file" accept=".csv,.tsv,.txt,.xy,.dat,.vms,.vamas,.npl,.xlsx,.xpsproject" hidden>
         </div>
       </div>
     </header>
@@ -336,6 +336,7 @@ td .number-input {
           <h1>Spectrum analysis</h1>
         </div>
         <div id="workspace-exports" class="export-actions" hidden>
+          <button id="save-project" class="button" type="button" title="Save every spectrum and its analysis as an XPS Workbench project"><span data-icon="download"></span>Save project</button>
           <button id="export-csv" class="button" type="button"><span data-icon="download"></span>CSV</button>
           <button id="export-plot" class="button" type="button"><span data-icon="external"></span>Plot Launcher</button>
           <button id="export-plot-csv" class="button" type="button" title="CSV for the Plot Launcher XPS Fit preset"><span data-icon="download"></span>XPS Fit CSV</button>
@@ -345,8 +346,8 @@ td .number-input {
       <section id="empty-project" class="card project-empty" aria-labelledby="empty-title">
         <div class="empty-project-icon" data-icon="activity" aria-hidden="true"></div>
         <h2 id="empty-title">No spectrum loaded</h2>
-        <p class="muted">Open or drop a spectrum file to begin.</p>
-        <button id="empty-open-file" class="button solid" type="button"><span data-icon="upload"></span>Open data</button>
+        <p class="muted">Open or drop a spectrum or project file.</p>
+        <button id="empty-open-file" class="button solid" type="button"><span data-icon="upload"></span>Open file</button>
       </section>
       <div id="analysis-workspace" class="layout" hidden>
         <section class="card chart-card" aria-labelledby="chart-title">
@@ -490,7 +491,8 @@ td .number-input {
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
-        <li>Export CSV to reopen the model, components, and residuals in Workbench. Plot Launcher and XPS Fit CSV also include the residuals.</li>
+        <li>Save project stores the original measurements and analysis for every spectrum in one .xpsproject file. Use Open file to resume from that project.</li>
+        <li>Export CSV to reopen the selected spectrum and its model, components, and residuals in Workbench. Plot Launcher and XPS Fit CSV also include the residuals.</li>
       </ol>
       <p>Pseudo-Voigt combines Gaussian and Lorentzian profiles of equal FWHM. Areas integrate the full component profile. Residuals are measured intensity minus the total fit.</p>
     </dialog>
@@ -3115,15 +3117,15 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
     const hasResidual = drag?.handle ? drag.scales.hasResidual : Boolean(model.residual);
     const mainBottom = hasResidual ? residualTop - 16 : residualBottom;
     const [xMin, xMax] = model.zoom;
-    const span = xMax - xMin;
-    const xValue = (value) => left + (model.reverse ? (xMax - value) / span : (value - xMin) / span) * (right - left);
-    const energyAt = (pixel) => model.reverse ? xMax - span * (pixel - left) / (right - left) : xMin + span * (pixel - left) / (right - left);
-    function plotWindow(energies) {
-      if (!energies?.length || energies[0] > xMax || energies.at(-1) < xMin) return null;
-      const first = Math.max(0, lowerBound(energies, xMin) - 1);
-      const last = Math.min(energies.length - 1, lowerBound(energies, xMax) + 1);
+    const span2 = xMax - xMin;
+    const xValue = (value) => left + (model.reverse ? (xMax - value) / span2 : (value - xMin) / span2) * (right - left);
+    const energyAt = (pixel) => model.reverse ? xMax - span2 * (pixel - left) / (right - left) : xMin + span2 * (pixel - left) / (right - left);
+    function plotWindow(energies2) {
+      if (!energies2?.length || energies2[0] > xMax || energies2.at(-1) < xMin) return null;
+      const first = Math.max(0, lowerBound(energies2, xMin) - 1);
+      const last = Math.min(energies2.length - 1, lowerBound(energies2, xMax) + 1);
       const stride = Math.max(1, Math.floor((last - first) / Math.max(800, width * 3)));
-      return { x: (i) => xValue(energies[i]), first, last, stride };
+      return { x: (i) => xValue(energies2[i]), first, last, stride };
     }
     const sharedWindow = plotWindow(model.x);
     const traces = model.series.map((series) => ({
@@ -3463,7 +3465,7 @@ function englishExportLabel(value, fallback = "Series") {
   return /[a-z0-9]/i.test(label) ? label : asciiText(fallback);
 }
 function englishExportFilename(value, fallback = "spectrum") {
-  const stem = String(value ?? "").replace(/\.(csv|tsv|txt|dat|xy|xlsx|vms|vamas|npl|plotproject)$/i, "");
+  const stem = String(value ?? "").replace(/\.(csv|tsv|txt|dat|xy|xlsx|vms|vamas|npl|plotproject|xpsproject)$/i, "");
   const label = englishExportLabel(stem, fallback);
   const filename = label.replace(/[^a-z0-9._-]+/gi, "-").slice(0, 120).replace(/^[.-]+|[.-]+$/g, "");
   if (!filename) return "spectrum";
@@ -4692,12 +4694,208 @@ function toPlotLauncherProject({
   });
 }
 
+// xps-source:src/project-file.js
+var FORMAT = "xps-workbench-project";
+var VERSION = 1;
+var MAX_PROJECT_BYTES = 256 * 1024 * 1024;
+var MAX_PEAKS2 = 12;
+var PARAMETERS = ["center", "fwhm", "height", "mix"];
+var SHAPES = ["pseudo-voigt", "gaussian", "lorentzian"];
+var METHODS = ["none", "linear", "shirley"];
+var BACKGROUND_STATUSES = ["ok", "no-peak", "iteration-limit"];
+var FIT_STATUSES = ["converged", "fixed", "stalled", "iteration-limit", "insufficient-points", "restored", "manual"];
+function requireValue(condition, field) {
+  if (!condition) throw new Error(`Invalid XPS Workbench project: ${field}.`);
+}
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isCounter(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+function numbers(values, length, field) {
+  requireValue(Array.isArray(values) && values.length === length, field);
+  for (const value of values) requireValue(Number.isFinite(value), field);
+  return values;
+}
+function strings(values, field) {
+  requireValue(Array.isArray(values), field);
+  for (const value of values) requireValue(typeof value === "string", field);
+  return values;
+}
+function span(pair, field) {
+  numbers(pair, 2, field);
+  requireValue(pair[0] < pair[1] && Number.isFinite(pair[1] - pair[0]), field);
+  return pair;
+}
+function energies(values, length, field) {
+  numbers(values, length, field);
+  requireValue(Number.isFinite(values.at(-1) - values[0]), field);
+  for (let i = 1; i < values.length; i++) requireValue(values[i] > values[i - 1], field);
+  return values;
+}
+function bound(value, infinity, encode, field) {
+  if (value === null || encode && value === infinity) return encode ? null : infinity;
+  requireValue(Number.isFinite(value), field);
+  return value;
+}
+function peakData(peak, energyScale, encode, field) {
+  requireValue(isRecord(peak) && isCounter(peak.id) && typeof peak.label === "string" && SHAPES.includes(peak.shape) && PARAMETERS.every((key) => Number.isFinite(peak[key])) && peak.fwhm > 0 && peak.height >= 0 && peak.mix >= 0 && peak.mix <= 1, field);
+  const { id, label, shape, center, fwhm, height, mix } = peak;
+  const normalized = { id, label, shape, center, fwhm, height, mix };
+  if (peak.doublet !== void 0) {
+    requireValue(isRecord(peak.doublet), `${field} doublet`);
+    const { separation, ratio } = peak.doublet;
+    const secondary = center + (energyScale === "kinetic" ? -separation : separation);
+    requireValue(
+      Number.isFinite(separation) && separation > 0 && Number.isFinite(secondary) && secondary !== center && Number.isFinite(ratio) && ratio > 0 && Number.isFinite(1 / ratio) && Number.isFinite(height / ratio),
+      `${field} doublet`
+    );
+    normalized.doublet = { separation, ratio };
+  }
+  if (peak.fixed !== void 0) {
+    requireValue(isRecord(peak.fixed), `${field} fixed parameter flags`);
+    normalized.fixed = {};
+    for (const key of PARAMETERS) {
+      if (peak.fixed[key] === void 0) continue;
+      requireValue(typeof peak.fixed[key] === "boolean", `${field} fixed ${key} flag`);
+      normalized.fixed[key] = peak.fixed[key];
+    }
+  }
+  if (peak.bounds !== void 0) {
+    requireValue(isRecord(peak.bounds), `${field} parameter bounds`);
+    normalized.bounds = {};
+    for (const key of PARAMETERS) {
+      const limits = peak.bounds[key];
+      if (limits === void 0) continue;
+      const boundField = `${field} ${key} bounds`;
+      requireValue(Array.isArray(limits) && limits.length === 2, boundField);
+      const low = bound(limits[0], -Infinity, encode, boundField);
+      const high = bound(limits[1], Infinity, encode, boundField);
+      requireValue((low ?? -Infinity) <= (high ?? Infinity), boundField);
+      normalized.bounds[key] = [low, high];
+    }
+  }
+  return normalized;
+}
+function resultData(result, peaks, length, field) {
+  if (result === null) return null;
+  requireValue(isRecord(result) && peaks.length > 0 && FIT_STATUSES.includes(result.status) && isCounter(result.iterations) && typeof result.converged === "boolean", field);
+  const { status, iterations, converged, fit, components, lines, residuals } = result;
+  numbers(fit, length, `${field} curve`);
+  numbers(residuals, length, `${field} residuals`);
+  requireValue(Array.isArray(components) && components.length === peaks.length && Array.isArray(lines) && lines.length === peaks.length, `${field} peak curves`);
+  for (const [i, peak] of peaks.entries()) {
+    numbers(components[i], length, `${field} peak ${i + 1} curve`);
+    requireValue(Array.isArray(lines[i]) && lines[i].length === (peak.doublet ? 2 : 1), `${field} peak ${i + 1} lines`);
+    for (const line2 of lines[i]) numbers(line2, length, `${field} peak ${i + 1} line`);
+  }
+  return { status, iterations, converged, fit, components, lines, residuals };
+}
+function analysisData(analysis, { x, energyScale }, encode, field) {
+  if (analysis === null) return null;
+  requireValue(isRecord(analysis), `${field} analysis`);
+  const { offset, range, zoom, method, view, shiftMode, nextId, reference = ["", ""], disabledSeries = [] } = analysis;
+  requireValue(Number.isFinite(offset) && METHODS.includes(method) && ["raw", "corrected"].includes(view) && ["direct", "reference"].includes(shiftMode), `${field} analysis settings`);
+  span(range, `${field} analysis range`);
+  span(zoom, `${field} zoom range`);
+  const shiftedX = analysis.shiftedX;
+  const shifted = energies(shiftedX ?? x.map((value) => value + offset), x.length, `${field} shifted energies`);
+  let sectionLength = 0;
+  for (const value of shifted) {
+    if (value >= range[0] && value <= range[1]) sectionLength++;
+  }
+  requireValue(sectionLength >= 3, `${field} analysis range must contain at least three points`);
+  requireValue(Array.isArray(analysis.peaks) && analysis.peaks.length <= MAX_PEAKS2 && isCounter(nextId) && nextId < Number.MAX_SAFE_INTEGER, `${field} peaks`);
+  const peaks = Array.from(analysis.peaks, (peak, i) => peakData(peak, energyScale, encode, `${field} peak ${i + 1}`));
+  requireValue(new Set(peaks.map(({ id }) => id)).size === peaks.length && peaks.every(({ id }) => id < nextId), `${field} peak IDs`);
+  strings(reference, `${field} reference inputs`);
+  requireValue(reference.length === 2, `${field} reference inputs`);
+  strings(disabledSeries, `${field} hidden plot series`);
+  const background = analysis.background;
+  requireValue(
+    isRecord(background) && BACKGROUND_STATUSES.includes(background.status) && isCounter(background.iterations),
+    `${field} background`
+  );
+  numbers(background.values, sectionLength, `${field} background values`);
+  return {
+    offset,
+    range,
+    zoom,
+    method,
+    view,
+    shiftMode,
+    peaks,
+    nextId,
+    reference,
+    disabledSeries,
+    background: { values: background.values, status: background.status, iterations: background.iterations },
+    result: resultData(analysis.result, peaks, sectionLength, `${field} fit result`),
+    ...shiftedX == null ? {} : { shiftedX }
+  };
+}
+function spectrumData(spectrum, index, encode) {
+  const field = `spectrum ${index + 1}`;
+  requireValue(isRecord(spectrum), field);
+  const { name, filename, energyScale, yUnit, x, y, sourceEnergy } = spectrum;
+  requireValue(typeof name === "string" && typeof filename === "string" && typeof yUnit === "string" && ["binding", "kinetic"].includes(energyScale), `${field} metadata`);
+  requireValue(Array.isArray(x) && x.length >= 3, `${field} measurements`);
+  energies(x, x.length, `${field} original energies`);
+  numbers(y, x.length, `${field} intensities`);
+  requireValue(sourceEnergy === void 0 || Number.isFinite(sourceEnergy) && sourceEnergy > 0, `${field} source energy`);
+  return {
+    name,
+    filename,
+    energyScale,
+    yUnit,
+    x,
+    y,
+    ...sourceEnergy === void 0 ? {} : { sourceEnergy },
+    analysis: analysisData(spectrum.analysis, spectrum, encode, field)
+  };
+}
+function projectData(project, encode) {
+  requireValue(isRecord(project), "project data");
+  const { name, filename, activeIndex, chartScope, overlayZoom = null, overlayHidden = [], spectra } = project;
+  requireValue(typeof name === "string" && typeof filename === "string", "project name and filename");
+  requireValue(Array.isArray(spectra) && spectra.length > 0, "spectra");
+  requireValue(isCounter(activeIndex) && activeIndex < spectra.length, "active spectrum index");
+  requireValue(chartScope === "single" || chartScope === "all" && spectra.length > 1, "chart scope");
+  if (overlayZoom !== null) span(overlayZoom, "overlay zoom range");
+  strings(overlayHidden, "hidden overlay spectra");
+  return {
+    format: FORMAT,
+    version: VERSION,
+    name,
+    filename,
+    activeIndex,
+    chartScope,
+    overlayZoom,
+    overlayHidden,
+    spectra: Array.from(spectra, (spectrum, index) => spectrumData(spectrum, index, encode))
+  };
+}
+function serializeProjectFile(project) {
+  return JSON.stringify(projectData(project, true));
+}
+function parseProjectFile(text) {
+  let project;
+  try {
+    project = JSON.parse(text.replace(/^\uFEFF/, ""));
+  } catch {
+    throw new Error("Could not read the XPS Workbench project. Check that the file is valid JSON.");
+  }
+  if (project?.format !== FORMAT) throw new Error("Choose an XPS Workbench project file.");
+  if (project.version !== VERSION) throw new Error("This XPS Workbench project version is unsupported.");
+  return projectData(project, false);
+}
+
 // xps-source:src/xps.js
 var LOG_TWO = Math.log(2);
 var GAUSSIAN_AREA = Math.sqrt(Math.PI / LOG_TWO) / 2;
 var LORENTZIAN_AREA = Math.PI / 2;
 var DEFAULT_MIX = 0.35;
-var PARAMETERS = ["center", "fwhm", "height", "mix"];
+var PARAMETERS2 = ["center", "fwhm", "height", "mix"];
 var PRIMARY_LINE = { offset: 0, weight: 1 };
 var SINGLE_LINE = [PRIMARY_LINE];
 function clamp(value, min, max) {
@@ -4747,7 +4945,7 @@ function analyzeBackground(points, method = "shirley", { energyScale = "binding"
   const ordered = reverse ? points.slice().reverse() : points;
   const start = ordered[0].y;
   const change = ordered.at(-1).y - start;
-  const span = Math.abs(energySpan);
+  const span2 = Math.abs(energySpan);
   const length = points.length;
   const signal = new Float64Array(length);
   const widths = new Float64Array(length);
@@ -4755,12 +4953,12 @@ function analyzeBackground(points, method = "shirley", { energyScale = "binding"
   for (let index = 0; index < length; index += 1) {
     signal[index] = ordered[index].y - start;
     intensityScale = Math.max(intensityScale, Math.abs(signal[index]));
-    if (index > 0) widths[index] = Math.abs(ordered[index].x - ordered[index - 1].x) / span;
+    if (index > 0) widths[index] = Math.abs(ordered[index].x - ordered[index - 1].x) / span2;
   }
   const limit = 120;
   const tolerance = 1e-8 * intensityScale;
   const areaTolerance = 1e-12 * intensityScale;
-  const baseline = Float64Array.from(ordered, ({ x }) => change * (Math.abs(x - ordered[0].x) / span));
+  const baseline = Float64Array.from(ordered, ({ x }) => change * (Math.abs(x - ordered[0].x) / span2));
   const integral = new Float64Array(length);
   baseline[length - 1] = change;
   for (let iteration = 1; iteration <= limit; iteration += 1) {
@@ -4856,14 +5054,14 @@ function estimatePeak(points, background, center) {
   }
   const firstX = points[0].x;
   const lastX = points.at(-1).x;
-  const span = Math.abs(firstX - lastX);
+  const span2 = Math.abs(firstX - lastX);
   const height = Math.max(net[peakIndex], largest * 0.015, Number.EPSILON);
   const left = halfHeightCrossing(points, net, peakIndex, -1, height / 2);
   const right = halfHeightCrossing(points, net, peakIndex, 1, height / 2);
-  const width = left !== null && right !== null ? Math.abs(left - right) : span / 12;
+  const width = left !== null && right !== null ? Math.abs(left - right) : span2 / 12;
   return {
     center: hasCenter ? clamp(center, Math.min(firstX, lastX), Math.max(firstX, lastX)) : points[peakIndex].x,
-    fwhm: Math.max(width, span / Math.max(1, points.length - 1), Number.EPSILON),
+    fwhm: Math.max(width, span2 / Math.max(1, points.length - 1), Number.EPSILON),
     height,
     mix: DEFAULT_MIX,
     shape: "pseudo-voigt"
@@ -4894,33 +5092,33 @@ function evaluateFit(points, background, peaks, options) {
   const residuals = points.map(({ y }, index) => y - fit[index]);
   return { peaks, components, lines, fit, residuals, ...fitStatistics(points, residuals) };
 }
-function parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale) {
+function parameterize(peaks, minimum, span2, intensityScale, sampleSpacing, energyScale) {
   const defaultBounds = {
-    center: [minimum, minimum + span],
-    fwhm: [Math.max(sampleSpacing * 0.1, span * 1e-8), Infinity],
+    center: [minimum, minimum + span2],
+    fwhm: [Math.max(sampleSpacing * 0.1, span2 * 1e-8), Infinity],
     height: [0, Infinity],
     mix: [0, 1]
   };
   const physicalBounds = {
     center: [-Infinity, Infinity],
-    fwhm: [span * 1e-12, Infinity],
+    fwhm: [span2 * 1e-12, Infinity],
     height: [0, Infinity],
     mix: [0, 1]
   };
-  const scales = { center: span, fwhm: span, mix: 1 };
+  const scales = { center: span2, fwhm: span2, mix: 1 };
   const variables = [];
   const models = peaks.map((peak, peakIndex) => {
     const doublet = doubletSpec(peak);
     const primaryWeight = doublet ? Math.min(1, doublet.ratio) : 1;
     const model = { indexes: [], lines: SINGLE_LINE, heightScale: intensityScale * primaryWeight };
     if (doublet) {
-      const offset = doubletOffset(doublet.separation, energyScale) / span;
+      const offset = doubletOffset(doublet.separation, energyScale) / span2;
       if (!Number.isFinite(offset) || offset === 0) {
         throw new RangeError(`Peak ${peakIndex + 1} has an unresolvable doublet separation.`);
       }
       model.lines = [{ offset: 0, weight: primaryWeight }, { offset, weight: primaryWeight / doublet.ratio }];
     }
-    for (const [parameterIndex, key] of PARAMETERS.entries()) {
+    for (const [parameterIndex, key] of PARAMETERS2.entries()) {
       const offset = key === "center" ? minimum : 0;
       const scale = key === "height" ? model.heightScale : scales[key];
       const value = key === "mix" ? fraction(peak) : peak[key];
@@ -4946,15 +5144,15 @@ function parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energ
   });
   return { models, variables };
 }
-function fitSystem(energies, net, models, variableCount, derivatives) {
+function fitSystem(energies2, net, models, variableCount, derivatives) {
   const jacobianRow = derivatives ? new Float64Array(variableCount) : null;
   const hessian = derivatives ? Array.from({ length: variableCount }, () => new Float64Array(variableCount)) : null;
   const gradient = derivatives ? new Float64Array(variableCount) : null;
   let cost = 0;
-  for (let index = 0; index < energies.length; index += 1) {
+  for (let index = 0; index < energies2.length; index += 1) {
     let value = 0;
     for (const model of models) {
-      const position = energies[index] - model.center;
+      const position = energies2[index] - model.center;
       const gaussianFraction = 1 - model.mix;
       let shape = 0;
       let centerSlope = 0;
@@ -5041,8 +5239,8 @@ function fitPeaks(points, background, peaks, { maxIterations = 180, energyScale 
   if (peaks.length === 0) throw new RangeError("Fit requires at least one peak.");
   if (!Number.isInteger(maxIterations) || maxIterations < 1) throw new RangeError("Invalid fit iteration limit.");
   const minimum = Math.min(points[0].x, points.at(-1).x);
-  const span = Math.abs(points[0].x - points.at(-1).x);
-  const energies = Float64Array.from(points, ({ x }) => (x - minimum) / span);
+  const span2 = Math.abs(points[0].x - points.at(-1).x);
+  const energies2 = Float64Array.from(points, ({ x }) => (x - minimum) / span2);
   const net = Float64Array.from(points, ({ y }, index) => y - background[index]);
   let intensityScale = 0;
   for (const value of net) intensityScale = Math.max(intensityScale, Math.abs(value));
@@ -5056,11 +5254,11 @@ function fitPeaks(points, background, peaks, { maxIterations = 180, energyScale 
   if (intensityScale === 0) intensityScale = 1;
   if (!Number.isFinite(intensityScale)) throw new RangeError("Fit requires finite intensities and peak parameters.");
   for (let index = 0; index < net.length; index += 1) net[index] /= intensityScale;
-  let sampleSpacing = span;
+  let sampleSpacing = span2;
   for (let index = 1; index < points.length; index += 1) {
     sampleSpacing = Math.min(sampleSpacing, Math.abs(points[index].x - points[index - 1].x));
   }
-  const parameterization = parameterize(peaks, minimum, span, intensityScale, sampleSpacing, energyScale);
+  const parameterization = parameterize(peaks, minimum, span2, intensityScale, sampleSpacing, energyScale);
   let models = parameterization.models;
   const variables = parameterization.variables;
   const count = variables.length;
@@ -5069,7 +5267,7 @@ function fitPeaks(points, background, peaks, { maxIterations = 180, energyScale 
   let damping = 1e-3;
   let system;
   while (status === "iteration-limit" && iterations < maxIterations) {
-    system ??= fitSystem(energies, net, models, count, true);
+    system ??= fitSystem(energies2, net, models, count, true);
     const { cost, hessian, gradient } = system;
     const free = [];
     let projectedGradient = 0;
@@ -5097,7 +5295,7 @@ function fitPeaks(points, background, peaks, { maxIterations = 180, energyScale 
         candidate[peakIndex][key] = next;
         stepSize = Math.max(stepSize, Math.abs(next - value) / Math.max(1, Math.abs(value)));
       }
-      const trialCost = fitSystem(energies, net, candidate, count, false).cost;
+      const trialCost = fitSystem(energies2, net, candidate, count, false).cost;
       if (trialCost < cost) {
         models = candidate;
         system = null;
@@ -5113,8 +5311,8 @@ function fitPeaks(points, background, peaks, { maxIterations = 180, energyScale 
     const model = models[index];
     return {
       ...peak,
-      center: peak.fixed?.center ? peak.center : minimum + span * model.center,
-      fwhm: peak.fixed?.fwhm ? peak.fwhm : span * model.fwhm,
+      center: peak.fixed?.center ? peak.center : minimum + span2 * model.center,
+      fwhm: peak.fixed?.fwhm ? peak.fwhm : span2 * model.fwhm,
       height: peak.fixed?.height ? peak.height : model.heightScale * model.height,
       mix: model.mix
     };
@@ -5149,13 +5347,13 @@ function restorePeakFromCurve(points, values) {
     last = energy;
   }
   const first = energyOf(points[0]);
-  const span = last - first;
-  if (!Number.isFinite(span)) throw new RangeError("The saved peak energy span is too large.");
+  const span2 = last - first;
+  if (!Number.isFinite(span2)) throw new RangeError("The saved peak energy span is too large.");
   const height = Math.max(0, values[apex]);
   if (height === 0) {
     return {
-      center: first + span / 2,
-      fwhm: Math.max(span / 12, 1e-6),
+      center: first + span2 / 2,
+      fwhm: Math.max(span2 / 12, 1e-6),
       height: 0,
       mix: 0.35,
       shape: "pseudo-voigt"
@@ -5172,7 +5370,7 @@ function restorePeakFromCurve(points, values) {
   const estimate = estimatePeak(curve, background);
   if (curve.length < 4) return { ...estimate, height };
   const atEdge = apex === 0 || apex === points.length - 1;
-  const initial = atEdge ? { ...estimate, bounds: { center: [first - span, last + span] } } : estimate;
+  const initial = atEdge ? { ...estimate, bounds: { center: [first - span2, last + span2] } } : estimate;
   const { peaks: [{ center, fwhm, height: fittedHeight, mix }] } = fitPeaks(curve, background, [initial], { maxIterations: 60 });
   const fitted = { center, fwhm, height: fittedHeight * height, mix, shape: estimate.shape };
   if (fitted.mix <= PURE_MIX_TOLERANCE) {
@@ -5295,6 +5493,7 @@ var spectrumFileType = {
   accept: {
     "text/csv": [".csv"],
     "text/plain": [".tsv", ".txt", ".xy", ".dat", ".vms", ".vamas", ".npl"],
+    "application/json": [".xpsproject"],
     [xlsxMime]: [".xlsx"]
   }
 };
@@ -5328,6 +5527,8 @@ function emptyProject() {
     activeRegion: null,
     sessions: /* @__PURE__ */ new Map(),
     pick: null,
+    pendingAnalyses: /* @__PURE__ */ new Map(),
+    projectFilename: null,
     chartScope: "single",
     overlayZoom: null,
     overlayHidden: /* @__PURE__ */ new Set()
@@ -5370,12 +5571,16 @@ function buildPeak(peak) {
   const id = state.nextId++;
   return { ...peak, label: peak.label || `Peak ${id + 1}`, id };
 }
-function recalculate() {
-  state.start = state.points.findIndex(({ x }) => x >= state.range[0]);
-  state.section = [];
-  for (let i = state.start; i >= 0 && i < state.points.length && state.points[i].x <= state.range[1]; i++) {
-    state.section.push(state.points[i]);
+function analysisSection(points, [minimum, maximum]) {
+  const start = points.findIndex(({ x }) => x >= minimum);
+  const section = [];
+  for (let i = start; i >= 0 && i < points.length && points[i].x <= maximum; i++) {
+    section.push(points[i]);
   }
+  return { start, section };
+}
+function recalculate() {
+  Object.assign(state, analysisSection(state.points, state.range));
   state.background = analyzeBackground(state.section, state.method, { energyScale: state.spectrum.energyScale });
   updatePreview();
 }
@@ -5542,9 +5747,37 @@ function initializeSpectrum(spectrum) {
     updatePreview();
   }
 }
+function projectEnergies(spectrum, { offset, shiftedX }) {
+  return shiftedX ?? (offset ? spectrum.x.map((x) => x + offset) : spectrum.x);
+}
+function restoreProjectSession(spectrum, saved) {
+  const { shiftedX, reference, disabledSeries, result, ...settings } = saved;
+  const original = spectrum.x.map((x, i) => ({ x, y: spectrum.y[i] }));
+  const energies2 = projectEnergies(spectrum, { offset: settings.offset, shiftedX });
+  const points = energies2 === spectrum.x ? original : energies2.map((x, i) => ({ x, y: spectrum.y[i] }));
+  const { start, section } = analysisSection(points, settings.range);
+  const restored = result ? { ...result, peaks: settings.peaks, ...fitStatistics(section, result.residuals) } : null;
+  const preview = restored ?? evaluateFit(section, settings.background.values, settings.peaks, { energyScale: spectrum.energyScale });
+  return {
+    analysis: {
+      ...settings,
+      spectrum,
+      original,
+      points,
+      start,
+      section,
+      result: restored,
+      preview,
+      disabledSeries: new Set(disabledSeries)
+    },
+    reference
+  };
+}
 function selectSpectrum(index) {
   const spectrum = state.dataset?.regions?.[index] ?? (index === 0 ? state.dataset : null);
   if (!spectrum || index === state.activeRegion) return;
+  const pending = state.pendingAnalyses.get(index);
+  const saved = state.sessions.get(index) ?? (pending ? restoreProjectSession(spectrum, pending) : null);
   const referenceInputs = ["observed", "target"].map(byId);
   if (state.activeRegion !== null) {
     state.sessions.set(state.activeRegion, {
@@ -5560,9 +5793,9 @@ function selectSpectrum(index) {
   constraintPeakId = void 0;
   state.pick = null;
   notice();
-  const saved = state.sessions.get(index);
   if (saved) Object.assign(state, saved.analysis);
   else initializeSpectrum(spectrum);
+  state.pendingAnalyses.delete(index);
   state.activeRegion = index;
   byId("plot-coordinates").textContent = "";
   referenceInputs.forEach((input, i) => {
@@ -5572,31 +5805,95 @@ function selectSpectrum(index) {
   showAnalysis(true);
   render();
 }
-function loadDataset(dataset, sourceHandle = null) {
+function loadDataset(dataset, sourceHandle = null, project = null, projectFilename = null) {
+  const regions = dataset.regions || [];
+  const index = project?.activeIndex ?? 0;
+  const pending = /* @__PURE__ */ new Map();
+  project?.spectra.forEach(({ analysis }, i) => {
+    if (analysis) pending.set(i, analysis);
+  });
+  const initial = pending.has(index) ? restoreProjectSession(regions[index], pending.get(index)) : null;
   state.dataset = dataset;
   state.sourceHandle = sourceHandle;
   state.activeRegion = null;
   state.sessions.clear();
-  state.chartScope = "single";
-  state.overlayZoom = null;
-  state.overlayHidden.clear();
-  const regions = dataset.regions || [];
+  if (initial) state.sessions.set(index, initial);
+  state.pendingAnalyses = pending;
+  state.projectFilename = projectFilename;
+  state.chartScope = project?.chartScope ?? "single";
+  state.overlayZoom = project?.overlayZoom ?? null;
+  state.overlayHidden = new Set(project?.overlayHidden);
   const select = byId("region");
-  select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
+  select.replaceChildren(...regions.map((region, index2) => new Option(region.name, index2)));
+  if (regions.length) select.selectedIndex = index;
   byId("region-wrap").hidden = regions.length < 2;
-  selectSpectrum(0);
+  selectSpectrum(index);
+}
+function loadProject(project, filename, handle) {
+  const regions = project.spectra.map(({ analysis, ...spectrum }) => ({ ...spectrum, xUnit: "eV" }));
+  loadDataset({ name: project.name, filename: project.filename, regions }, handle, project, filename);
+}
+function spectrumAnalysis(index) {
+  return index === state.activeRegion ? state : state.sessions.get(index)?.analysis;
 }
 function shiftedSpectra() {
   return (state.dataset.regions ?? [state.dataset]).map((spectrum, index) => {
-    const points = index === state.activeRegion ? state.points : state.sessions.get(index)?.analysis.points;
+    const analysis = spectrumAnalysis(index);
+    const pending = state.pendingAnalyses.get(index);
     return {
       name: spectrum.name,
       energyScale: spectrum.energyScale,
       yUnit: spectrum.yUnit,
-      x: points ? points.map(({ x }) => x) : spectrum.x,
+      x: analysis ? analysis.points.map(({ x }) => x) : pending ? projectEnergies(spectrum, pending) : spectrum.x,
       y: spectrum.y
     };
   });
+}
+function projectSnapshot() {
+  const { dataset, activeRegion, chartScope, overlayZoom, overlayHidden } = state;
+  const spectra = (dataset.regions ?? [dataset]).map((spectrum, index) => {
+    const analysis = spectrumAnalysis(index);
+    const { name, filename = "", energyScale, yUnit = "", y, sourceEnergy } = spectrum;
+    const measurement = { name, filename, energyScale, yUnit, y, sourceEnergy };
+    if (!analysis) return { ...measurement, x: spectrum.x, analysis: state.pendingAnalyses.get(index) ?? null };
+    const { original, points, offset, range, zoom, method, view, shiftMode, peaks, nextId, disabledSeries, background, result } = analysis;
+    const x = original.map((point) => point.x);
+    const hasDistinctShift = points.some((point, i) => point.x !== x[i] + offset);
+    const reference = index === activeRegion ? ["observed", "target"].map((id) => byId(id).value) : state.sessions.get(index).reference;
+    let savedResult = null;
+    if (result) {
+      const { fit, components, lines, residuals, status, iterations, converged } = result;
+      savedResult = { fit, components, lines, residuals, status, iterations, converged };
+    }
+    return {
+      ...measurement,
+      x,
+      analysis: {
+        offset,
+        range,
+        zoom,
+        method,
+        view,
+        shiftMode,
+        nextId,
+        background,
+        reference,
+        peaks: peaks.map((peak) => ({ ...peak })),
+        disabledSeries: [...disabledSeries],
+        result: savedResult,
+        ...hasDistinctShift ? { shiftedX: points.map((point) => point.x) } : {}
+      }
+    };
+  });
+  return {
+    name: dataset.name,
+    filename: dataset.filename || "",
+    activeIndex: activeRegion,
+    chartScope,
+    overlayZoom,
+    overlayHidden: [...overlayHidden],
+    spectra
+  };
 }
 function changeChartScope(scope) {
   if (state.chartScope === scope || scope === "all" && (state.dataset.regions?.length ?? 0) < 2) return;
@@ -6171,6 +6468,7 @@ function runFit() {
   }
 }
 var exportFormats = {
+  project: { description: "XPS Workbench project", extension: ".xpsproject", mime: "application/json", suffix: "" },
   csv: { description: "Spectrum CSV", extension: ".csv", mime: "text/csv" },
   shiftedCsv: { description: "Shifted spectrum CSV", extension: ".csv", mime: "text/csv", suffix: "-shifted" },
   shiftedXlsx: { description: "Shifted spectra workbook", extension: ".xlsx", mime: xlsxMime, suffix: "-shifted" },
@@ -6250,12 +6548,14 @@ function downloadBlob(blob, filename) {
 async function exportData(format) {
   if (!state.spectrum) return;
   const workbook = format === "shiftedXlsx" ? shiftedSpectra() : null;
+  const savedProject = format === "project" ? projectSnapshot() : null;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
   const { dataset, spectrum, sourceHandle, activeRegion } = project;
-  const source = workbook ? dataset : spectrum;
-  const stem = englishExportFilename(source.filename || source.name);
+  const wholeDataset = Boolean(workbook || savedProject);
+  const source = wholeDataset ? dataset : spectrum;
+  const stem = englishExportFilename(savedProject && state.projectFilename || source.filename || source.name);
   const { extension, mime, description, suffix = "-xps" } = exportFormats[format];
-  const prefix = !workbook && dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : "";
+  const prefix = !wholeDataset && dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : "";
   const label = prefix ? englishExportFilename(spectrum.name, "spectrum") : stem;
   const name = prefix + label.slice(0, 120 - prefix.length - suffix.length) + suffix;
   const filename = name + extension;
@@ -6273,10 +6573,11 @@ async function exportData(format) {
         if (!pickerUnavailable(error)) throw error;
       }
     }
-    const payload = workbook ? await spectraToXlsx(workbook) : exportPayload(project, format, name);
+    const payload = savedProject ? serializeProjectFile(savedProject) : workbook ? await spectraToXlsx(workbook) : exportPayload(project, format, name);
     const blob = new Blob([payload], {
       type: extension === ".csv" ? mime + ";charset=utf-8" : mime
     });
+    if (savedProject && blob.size > MAX_PROJECT_BYTES) throw new Error("The project file is too large.");
     if (destination) {
       const writer = await destination.createWritable();
       try {
@@ -6290,7 +6591,7 @@ async function exportData(format) {
     } else {
       downloadBlob(blob, filename);
     }
-    if (state.dataset === dataset) toast(`${description} exported.`);
+    if (state.dataset === dataset) toast(savedProject ? "Project saved." : `${description} exported.`);
   } catch (error) {
     if (state.dataset === dataset) notice(error.message || "Could not export the file.");
   }
@@ -6436,8 +6737,14 @@ async function open(readSource, nativePicker = false) {
   try {
     const { file, handle } = await readSource();
     if (!file || load !== fileLoad) return;
-    const spectrum = await readSpectrumFile(file);
-    if (load === fileLoad) loadDataset(spectrum, handle);
+    if (/\.xpsproject$/i.test(file.name)) {
+      if (file.size > MAX_PROJECT_BYTES) throw new Error("The project file is too large.");
+      const text = await file.text();
+      if (load === fileLoad) loadProject(parseProjectFile(text), file.name, handle);
+    } else {
+      const spectrum = await readSpectrumFile(file);
+      if (load === fileLoad) loadDataset(spectrum, handle);
+    }
   } catch (error) {
     if (load !== fileLoad || error?.name === "AbortError") return;
     if (nativePicker && pickerUnavailable(error)) byId("file").click();
@@ -6583,6 +6890,7 @@ byId("peak-form").addEventListener("input", () => {
   for (const input of byId("peak-form").querySelectorAll("input")) input.setCustomValidity("");
 });
 byId("export-csv").addEventListener("click", () => exportData("csv"));
+byId("save-project").addEventListener("click", () => exportData("project"));
 byId("export-shifted-csv").addEventListener("click", () => exportData("shiftedCsv"));
 byId("export-shifted-xlsx").addEventListener("click", () => exportData("shiftedXlsx"));
 byId("export-plot").addEventListener("click", () => exportData("plotproject"));
