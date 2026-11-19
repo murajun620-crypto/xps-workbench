@@ -60,7 +60,11 @@
               <div id="region-wrap" class="region" hidden><label for="region">Spectrum</label><select id="region"></select></div>
             </div>
             <div class="chart-actions">
-              <div class="segmented" aria-label="Spectrum display">
+              <div id="chart-scope" class="segmented" role="group" aria-label="Spectra to display" hidden>
+                <button type="button" data-scope="single" aria-pressed="true">Selected spectrum</button>
+                <button type="button" data-scope="all" aria-pressed="false">All spectra</button>
+              </div>
+              <div id="individual-display" class="segmented" role="group" aria-label="Selected spectrum display">
                 <button type="button" data-view="raw" aria-pressed="true">Measured</button>
                 <button type="button" data-view="corrected" aria-pressed="false">Background-subtracted</button>
               </div>
@@ -102,9 +106,10 @@
                 <button type="submit" class="button field-button">Apply</button>
               </div>
             </form>
+            <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
             <div class="field-row shift-actions">
-              <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
-              <button id="export-shifted-csv" class="button" type="button" title="Export all shifted energies and measured intensities"><span data-icon="download"></span>Shifted CSV</button>
+              <button id="export-shifted-csv" class="button" type="button" title="Export the selected spectrum's shifted energies and measured intensities"><span data-icon="download"></span>Shifted CSV</button>
+              <button id="export-shifted-xlsx" class="button" type="button" title="Export all spectra as separate sheets in one Excel workbook"><span data-icon="download"></span>Shifted XLSX</button>
             </div>
           </div>
           <div class="settings-section">
@@ -182,8 +187,8 @@
     <dialog id="help-dialog" aria-labelledby="help-title">
       <div class="dialog-head"><h2 id="help-title">Help</h2><button type="button" data-close="help-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
       <ol class="help-list">
-        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS file. Use Spectrum to switch between measurements. Each spectrum keeps its own shift and fit settings while the file is open.</li>
-        <li>Enter an energy offset, or enter the measured and reference energies of a known peak. Shifted CSV exports the selected spectrum's shifted energy and measured intensity over the full range.</li>
+        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS file. Use Spectrum to select a measurement for analysis and All spectra to overlay the measured curves at their applied energies.</li>
+        <li>Enter an energy offset, or enter the measured and reference energies of a known peak. Shifted CSV exports the selected spectrum's full data. Shifted XLSX puts each spectrum's shifted energies and measured intensities on its own sheet.</li>
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>

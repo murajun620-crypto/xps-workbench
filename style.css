@@ -34,6 +34,7 @@ h1, h2, h3, p { margin: 0; }
 .brand-mark svg { width: 27px; }
 .top-actions, .release-controls, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
 .export-actions { flex-wrap: wrap; }
+.chart-actions { flex-wrap: wrap; justify-content: flex-end; }
 .release-controls { margin-inline-start: auto; }
 .app-version { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .button, .quiet, .text-button, .icon-button { border-radius: 8px; font-size: .875rem; font-weight: 630; }
@@ -76,6 +77,8 @@ h3 { font-size: .965rem; font-weight: 740; }
 .plot { margin: 0 12px; background: #121a30; color: #e7ebfb; border-radius: 10px; overflow: hidden; }
 .legend { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; padding: 11px 12px 0 15px; min-height: 33px; }
 .legend button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 3px; color: #eef0fc; background: transparent; border: 0; border-radius: 3px; font-size: .76rem; white-space: nowrap; }
+.legend button[data-series^="spectrum-"] { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.legend button[data-series^="spectrum-"] .legend-mark { flex: none; }
 .legend button:hover { background: #283450; }
 .legend button[aria-pressed="false"] { opacity: .45; }
 .legend-mark { width: 15px; height: 2px; background: var(--series); border-radius: 2px; }
@@ -99,8 +102,8 @@ label, .range-title { display: block; font-size: .875rem; font-weight: 620; colo
 .field-row { align-items: end; gap: 7px; }
 .field-row > label { min-width: 0; flex: 1; }
 .reference-actions { margin-top: 8px; justify-content: space-between; }
-.shift-actions { margin-top: 8px; align-items: center; justify-content: space-between; }
-.shift-actions .section-note { margin-top: 0; }
+.shift-actions { margin-top: 8px; flex-wrap: wrap; }
+.shift-actions .button { padding-inline: 9px; }
 .unit-input { position: relative; flex: 1; min-width: 0; }
 label .unit-input { margin-top: 4px; }
 .unit-input input { padding-right: 26px; }

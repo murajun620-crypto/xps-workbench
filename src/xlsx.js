@@ -1,10 +1,13 @@
 import JSZip from 'jszip';
+import { englishExportLabel } from './export-labels.js';
 
 const MAX_XML_BYTES = 32 * 1024 * 1024;
 const MAX_WORKBOOK_XML_BYTES = 64 * 1024 * 1024;
 const MAX_COLUMN = 16384;
 const MAX_ROWS = 200000;
 const PACKAGE_ORIGIN = 'https://xlsx.invalid';
+const SPREADSHEET_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const PACKAGE_NAMESPACE = 'http://schemas.openxmlformats.org/package/2006';
 const OFFICE_REL_NAMESPACES = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
   'http://purl.oclc.org/ooxml/officeDocument/relationships',
@@ -186,4 +189,86 @@ export async function* xlsxWorksheets(bytes) {
     const rows = worksheetRows(await read(worksheet.path, 'worksheet'), sharedStrings);
     yield { name: sheet.getAttribute('name') || 'Worksheet', rows };
   }
+}
+
+const XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+const XML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' };
+const MAX_SHEET_NAME = 31;
+
+function xmlText(value) {
+  return value.replace(/[&<>"']/g, (character) => XML_ESCAPES[character]);
+}
+
+function worksheetName(label, index, names) {
+  const fallback = `Spectrum ${index + 1}`;
+  const base = englishExportLabel(label, fallback)
+    .replace(/[:\\/?*\[\]]+/g, ' ')
+    .replace(/_x(?=[0-9a-f]{4}_)/gi, '-x')
+    .replace(/\s+/g, ' ');
+  const fit = (length) => base.slice(0, length).replace(/^[\s']+|[\s']+$/g, '') || fallback;
+  let name = fit(MAX_SHEET_NAME);
+  for (let number = 2; names.has(name.toLowerCase()); number++) {
+    const suffix = ` (${number})`;
+    name = fit(MAX_SHEET_NAME - suffix.length) + suffix;
+  }
+  names.add(name.toLowerCase());
+  return name;
+}
+
+function worksheetXml({ x, y, energyScale, yUnit, xUnit = 'eV' }, name) {
+  if (!x || !y || x.length !== y.length || x.length < 3) {
+    throw new Error(`Spectrum "${name}" requires at least three paired energy and intensity values.`);
+  }
+  if (x.length >= 1048576) throw new Error(`Spectrum "${name}" exceeds Excel's worksheet row limit.`);
+  const kinetic = energyScale === 'kinetic';
+  const energyLabel = `${kinetic ? 'Kinetic Energy' : 'Binding Energy'} (${englishExportLabel(xUnit, 'eV')})`;
+  const signalUnit = englishExportLabel(yUnit, '');
+  const intensityLabel = signalUnit ? `Measured Intensity (${signalUnit})` : 'Measured Intensity';
+  const rows = [`<row r="1"><c r="A1" t="inlineStr"><is><t>${xmlText(energyLabel)}</t></is></c>` +
+    `<c r="B1" t="inlineStr"><is><t>${xmlText(intensityLabel)}</t></is></c></row>`];
+  // Match shifted CSV's order on the binding and kinetic energy scales.
+  for (let row = 0; row < x.length; row++) {
+    const index = kinetic ? row : x.length - row - 1;
+    const energy = x[index];
+    const intensity = y[index];
+    if (!Number.isFinite(energy) || !Number.isFinite(intensity)) {
+      throw new Error(`Spectrum "${name}" contains an invalid energy or intensity value.`);
+    }
+    const address = row + 2;
+    rows.push(`<row r="${address}"><c r="A${address}"><v>${energy}</v></c><c r="B${address}"><v>${intensity}</v></c></row>`);
+  }
+  return `${XML_HEADER}<worksheet xmlns="${SPREADSHEET_NAMESPACE}"><dimension ref="A1:B${rows.length}"/>` +
+    '<cols><col min="1" max="1" width="23" customWidth="1"/><col min="2" max="2" width="32" customWidth="1"/></cols>' +
+    `<sheetData>${rows.join('')}</sheetData></worksheet>`;
+}
+
+export async function spectraToXlsx(spectra) {
+  if (!spectra.length) throw new Error('Choose at least one spectrum to export.');
+  const zip = new JSZip();
+  const names = new Set(['history']);
+  const sheets = [];
+  const contentTypes = [
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+  ];
+  const worksheetLinks = [];
+  const relationships = `${XML_HEADER}<Relationships xmlns="${PACKAGE_NAMESPACE}/relationships">`;
+  const officeRelationships = OFFICE_REL_NAMESPACES[0];
+  zip.file('_rels/.rels', relationships +
+    `<Relationship Id="rId1" Type="${officeRelationships}/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+  for (const [index, spectrum] of spectra.entries()) {
+    const id = index + 1;
+    const name = worksheetName(spectrum.name, index, names);
+    const path = `worksheets/sheet${id}.xml`;
+    zip.file(`xl/${path}`, worksheetXml(spectrum, name));
+    sheets.push(`<sheet name="${xmlText(name)}" sheetId="${id}" r:id="rId${id}"/>`);
+    worksheetLinks.push(`<Relationship Id="rId${id}" Type="${officeRelationships}/worksheet" Target="${path}"/>`);
+    contentTypes.push(`<Override PartName="/xl/${path}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`);
+  }
+  zip.file('xl/workbook.xml', `${XML_HEADER}<workbook xmlns="${SPREADSHEET_NAMESPACE}" xmlns:r="${officeRelationships}">` +
+    `<sheets>${sheets.join('')}</sheets></workbook>`);
+  zip.file('xl/_rels/workbook.xml.rels', `${relationships}${worksheetLinks.join('')}</Relationships>`);
+  zip.file('[Content_Types].xml', `${XML_HEADER}<Types xmlns="${PACKAGE_NAMESPACE}/content-types">${contentTypes.join('')}</Types>`);
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }

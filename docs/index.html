@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f6fb">
-    <meta name="xps-version" content="1.5.0">
-    <meta name="xps-build" content="70fe5373ec14">
+    <meta name="xps-version" content="1.6.0">
+    <meta name="xps-build" content="92930c1799a0">
     <meta name="description" content="Energy calibration, background subtraction, and peak fitting for XPS spectra.">
     <title>XPS Workbench</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%20%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%23191b35%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2041h9.7c3.1%200%205.5-2%206.3-5l3.1-13.2a1.95%201.95%200%200%201%203.8%200L37%2036c.7%203%203.1%205%206.2%205H53%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223.8%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M11%2048h42%22%20fill%3D%22none%22%20stroke%3D%22%23b8aaff%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
@@ -46,6 +46,7 @@ h1, h2, h3, p { margin: 0; }
 .brand-mark svg { width: 27px; }
 .top-actions, .release-controls, .export-actions, .chart-actions, .field-row, .range-title, .dialog-actions { display: flex; align-items: center; gap: 9px; }
 .export-actions { flex-wrap: wrap; }
+.chart-actions { flex-wrap: wrap; justify-content: flex-end; }
 .release-controls { margin-inline-start: auto; }
 .app-version { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .button, .quiet, .text-button, .icon-button { border-radius: 8px; font-size: .875rem; font-weight: 630; }
@@ -88,6 +89,8 @@ h3 { font-size: .965rem; font-weight: 740; }
 .plot { margin: 0 12px; background: #121a30; color: #e7ebfb; border-radius: 10px; overflow: hidden; }
 .legend { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; padding: 11px 12px 0 15px; min-height: 33px; }
 .legend button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 3px; color: #eef0fc; background: transparent; border: 0; border-radius: 3px; font-size: .76rem; white-space: nowrap; }
+.legend button[data-series^="spectrum-"] { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.legend button[data-series^="spectrum-"] .legend-mark { flex: none; }
 .legend button:hover { background: #283450; }
 .legend button[aria-pressed="false"] { opacity: .45; }
 .legend-mark { width: 15px; height: 2px; background: var(--series); border-radius: 2px; }
@@ -111,8 +114,8 @@ label, .range-title { display: block; font-size: .875rem; font-weight: 620; colo
 .field-row { align-items: end; gap: 7px; }
 .field-row > label { min-width: 0; flex: 1; }
 .reference-actions { margin-top: 8px; justify-content: space-between; }
-.shift-actions { margin-top: 8px; align-items: center; justify-content: space-between; }
-.shift-actions .section-note { margin-top: 0; }
+.shift-actions { margin-top: 8px; flex-wrap: wrap; }
+.shift-actions .button { padding-inline: 9px; }
 .unit-input { position: relative; flex: 1; min-width: 0; }
 label .unit-input { margin-top: 4px; }
 .unit-input input { padding-right: 26px; }
@@ -355,7 +358,11 @@ td .number-input {
               <div id="region-wrap" class="region" hidden><label for="region">Spectrum</label><select id="region"></select></div>
             </div>
             <div class="chart-actions">
-              <div class="segmented" aria-label="Spectrum display">
+              <div id="chart-scope" class="segmented" role="group" aria-label="Spectra to display" hidden>
+                <button type="button" data-scope="single" aria-pressed="true">Selected spectrum</button>
+                <button type="button" data-scope="all" aria-pressed="false">All spectra</button>
+              </div>
+              <div id="individual-display" class="segmented" role="group" aria-label="Selected spectrum display">
                 <button type="button" data-view="raw" aria-pressed="true">Measured</button>
                 <button type="button" data-view="corrected" aria-pressed="false">Background-subtracted</button>
               </div>
@@ -397,9 +404,10 @@ td .number-input {
                 <button type="submit" class="button field-button">Apply</button>
               </div>
             </form>
+            <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
             <div class="field-row shift-actions">
-              <p class="muted section-note" id="shift-info">Applied: 0.000 eV</p>
-              <button id="export-shifted-csv" class="button" type="button" title="Export all shifted energies and measured intensities"><span data-icon="download"></span>Shifted CSV</button>
+              <button id="export-shifted-csv" class="button" type="button" title="Export the selected spectrum's shifted energies and measured intensities"><span data-icon="download"></span>Shifted CSV</button>
+              <button id="export-shifted-xlsx" class="button" type="button" title="Export all spectra as separate sheets in one Excel workbook"><span data-icon="download"></span>Shifted XLSX</button>
             </div>
           </div>
           <div class="settings-section">
@@ -477,8 +485,8 @@ td .number-input {
     <dialog id="help-dialog" aria-labelledby="help-title">
       <div class="dialog-head"><h2 id="help-title">Help</h2><button type="button" data-close="help-dialog" class="icon-button" aria-label="Close"><span data-icon="close"></span></button></div>
       <ol class="help-list">
-        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS file. Use Spectrum to switch between measurements. Each spectrum keeps its own shift and fit settings while the file is open.</li>
-        <li>Enter an energy offset, or enter the measured and reference energies of a known peak. Shifted CSV exports the selected spectrum's shifted energy and measured intensity over the full range.</li>
+        <li>Open a CSV, TSV, TXT, XLSX, or VAMAS file. Use Spectrum to select a measurement for analysis and All spectra to overlay the measured curves at their applied energies.</li>
+        <li>Enter an energy offset, or enter the measured and reference energies of a known peak. Shifted CSV exports the selected spectrum's full data. Shifted XLSX puts each spectrum's shifted energies and measured intensities on its own sheet.</li>
         <li>Choose a background method and an analysis range. Shirley and Linear use the intensities at the range endpoints.</li>
         <li>Add peaks and adjust them in the plot. Drag a circle to change position and height, or a half-height diamond to change FWHM. The residual updates as you adjust the model. Run fit uses the current values as its starting point.</li>
         <li>To fit a doublet, select Add doublet and click the primary line. The Si 2p defaults are 0.606 eV separation and a 2:1 primary-to-secondary area ratio. Edit these in Constraints. Both lines share FWHM and line shape.</li>
@@ -3110,23 +3118,35 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
     const span = xMax - xMin;
     const xValue = (value) => left + (model.reverse ? (xMax - value) / span : (value - xMin) / span) * (right - left);
     const energyAt = (pixel) => model.reverse ? xMax - span * (pixel - left) / (right - left) : xMin + span * (pixel - left) / (right - left);
-    const x = (i) => xValue(model.x[i]);
-    const first = Math.max(0, lowerBound(model.x, xMin) - 1);
-    const last = Math.min(model.x.length - 1, lowerBound(model.x, xMax) + 1);
-    const stride = Math.max(1, Math.floor((last - first) / Math.max(800, width * 3)));
+    function plotWindow(energies) {
+      if (!energies?.length || energies[0] > xMax || energies.at(-1) < xMin) return null;
+      const first = Math.max(0, lowerBound(energies, xMin) - 1);
+      const last = Math.min(energies.length - 1, lowerBound(energies, xMax) + 1);
+      const stride = Math.max(1, Math.floor((last - first) / Math.max(800, width * 3)));
+      return { x: (i) => xValue(energies[i]), first, last, stride };
+    }
+    const sharedWindow = plotWindow(model.x);
+    const traces = model.series.map((series) => ({
+      series,
+      window: series.x ? plotWindow(series.x) : sharedWindow
+    })).filter((trace) => trace.window);
     let yMin = 0;
     let yMax = 0;
     let residualMax = 0;
-    for (let i = first; i <= last; i++) {
-      for (const series of model.series) {
-        if (!series.visible && !series.primary) continue;
+    for (const { series, window: { first, last } } of traces) {
+      if (!series.visible && !series.primary) continue;
+      for (let i = first; i <= last; i++) {
         const value = series.values[i];
         if (!Number.isFinite(value)) continue;
         yMin = Math.min(yMin, value);
         yMax = Math.max(yMax, value);
       }
-      if (Number.isFinite(model.residual?.[i])) {
-        residualMax = Math.max(residualMax, Math.abs(model.residual[i]));
+    }
+    if (model.residual && sharedWindow) {
+      for (let i = sharedWindow.first; i <= sharedWindow.last; i++) {
+        if (Number.isFinite(model.residual[i])) {
+          residualMax = Math.max(residualMax, Math.abs(model.residual[i]));
+        }
       }
     }
     if (drag?.handle) {
@@ -3146,7 +3166,7 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
     const intensityAt = (pixel) => yMin + (mainBottom - pixel) * (yMax - yMin) / (mainBottom - top);
     const residualY = (value) => (residualTop + residualBottom) / 2 - value / residualMax * (residualBottom - residualTop) / 2;
     scales = { left, top, right, bottom: residualBottom, energyAt, intensityAt, yMin, yMax, hasResidual };
-    if (model.range[0] > xMin || model.range[1] < xMax) {
+    if (model.range && (model.range[0] > xMin || model.range[1] < xMax)) {
       const [rangeLeft, rangeRight] = model.range.map(xValue).sort((a, b) => a - b);
       const visibleLeft = Math.max(left, Math.min(right, rangeLeft));
       const visibleRight = Math.max(left, Math.min(right, rangeRight));
@@ -3188,8 +3208,8 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
     ctx.beginPath();
     ctx.rect(left, top, right - left, mainBottom - top);
     ctx.clip();
-    const visible = model.series.filter((series) => series.visible);
-    for (const series of visible) {
+    const visible = traces.filter(({ series }) => series.visible);
+    for (const { series, window: { x, first, last, stride } } of visible) {
       if (!series.base) continue;
       ctx.beginPath();
       path(ctx, series.values, x, y, Math.max(first, series.start), Math.min(last, series.end), stride);
@@ -3204,7 +3224,8 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
       ctx.fillStyle = series.color + "30";
       ctx.fill();
     }
-    for (const series of visible.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+    visible.sort(({ series: a }, { series: b }) => (a.order ?? 0) - (b.order ?? 0));
+    for (const { series, window: { x, first, last, stride } } of visible) {
       ctx.strokeStyle = series.color;
       ctx.fillStyle = series.color;
       ctx.lineWidth = series.width ?? 1.5;
@@ -3233,7 +3254,7 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
       handle,
       x: xValue(handle.x),
       y: y(handle.y)
-    })).filter(({ x: x2, y: y2 }) => x2 >= left && x2 <= right && y2 >= top && y2 <= mainBottom) : [];
+    })).filter(({ x, y: y2 }) => x >= left && x <= right && y2 >= top && y2 <= mainBottom) : [];
     syncHandleTargets();
     const hovered = pointer && !drag ? nearestHandle(pointer) : null;
     const focused = document2.activeElement?.dataset.peakHandle;
@@ -3247,7 +3268,8 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
     ctx.restore();
     ctx.setLineDash([]);
     ctx.lineWidth = 1;
-    if (model.residual) {
+    if (model.residual && sharedWindow) {
+      const { x, first, last, stride } = sharedWindow;
       line(ctx, left, residualY(0), right, residualY(0), palette.zero);
       ctx.save();
       ctx.beginPath();
@@ -3279,8 +3301,31 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
     ctx.fillText(model.yLabel, 0, 0);
     ctx.restore();
     if (pointer && !drag?.handle && !hovered && pointer.x >= left && pointer.x <= right && pointer.y >= top && pointer.y <= residualBottom) {
-      const index = nearestIndex(model.x, energyAt(pointer.x));
-      const at = x(index);
+      const energy = energyAt(pointer.x);
+      let sampleEnergy = energy;
+      let sample;
+      let label;
+      if (model.x) {
+        const index = nearestIndex(model.x, energy);
+        sampleEnergy = model.x[index];
+        sample = model.series.find((series) => series.primary)?.values[index];
+      } else if (!drag) {
+        let distance = 20 ** 2;
+        for (const { series } of visible) {
+          const index = nearestIndex(series.x, energy);
+          const sampleX = series.x[index];
+          const sampleY = series.values[index];
+          if (sampleX < xMin || sampleX > xMax || !Number.isFinite(sampleY)) continue;
+          const candidate = (xValue(sampleX) - pointer.x) ** 2 + (y(sampleY) - pointer.y) ** 2;
+          if (candidate < distance) {
+            distance = candidate;
+            sampleEnergy = sampleX;
+            sample = sampleY;
+            label = series.label;
+          }
+        }
+      }
+      const at = xValue(sampleEnergy);
       if (drag && Math.abs(pointer.x - drag.x) >= 7) {
         ctx.fillStyle = "#9985ff2f";
         ctx.fillRect(Math.min(drag.x, pointer.x), top, Math.abs(pointer.x - drag.x), residualBottom - top);
@@ -3289,10 +3334,9 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
         line(ctx, at, top, at, residualBottom, palette.hover);
         ctx.setLineDash([]);
       }
-      const sample = model.series.find((series) => series.primary)?.values[index];
       if (Number.isFinite(sample)) {
         tooltip.hidden = false;
-        tooltip.textContent = `${formatTick(model.x[index])} eV \xB7 ${formatTick(sample)}`;
+        tooltip.textContent = `${label ? `${label} \xB7 ` : ""}${formatTick(sampleEnergy)} eV \xB7 ${formatTick(sample)}`;
         tooltip.style.left = `${Math.max(4, Math.min(at + 10, width - tooltip.offsetWidth - 5))}px`;
         tooltip.style.top = `${Math.max(7, pointer.y - 32)}px`;
         return;
@@ -3352,7 +3396,7 @@ function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDrag) {
       const to = Math.min(scales.right, Math.max(scales.left, point(event).x));
       if (Math.abs(to - drag.x) >= 7) {
         onZoom([scales.energyAt(drag.x), scales.energyAt(to)].sort((a, b) => a - b));
-      } else {
+      } else if (model.x) {
         onPick(model.x[nearestIndex(model.x, scales.energyAt(to))]);
       }
       drag = null;
@@ -3551,6 +3595,8 @@ var MAX_WORKBOOK_XML_BYTES = 64 * 1024 * 1024;
 var MAX_COLUMN = 16384;
 var MAX_ROWS = 2e5;
 var PACKAGE_ORIGIN = "https://xlsx.invalid";
+var SPREADSHEET_NAMESPACE = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+var PACKAGE_NAMESPACE = "http://schemas.openxmlformats.org/package/2006";
 var OFFICE_REL_NAMESPACES = [
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
   "http://purl.oclc.org/ooxml/officeDocument/relationships"
@@ -3712,6 +3758,74 @@ async function* xlsxWorksheets(bytes) {
     const rows = worksheetRows(await read(worksheet.path, "worksheet"), sharedStrings);
     yield { name: sheet.getAttribute("name") || "Worksheet", rows };
   }
+}
+var XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+var XML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" };
+var MAX_SHEET_NAME = 31;
+function xmlText(value) {
+  return value.replace(/[&<>"']/g, (character) => XML_ESCAPES[character]);
+}
+function worksheetName(label, index, names) {
+  const fallback = `Spectrum ${index + 1}`;
+  const base = englishExportLabel(label, fallback).replace(/[:\\/?*\[\]]+/g, " ").replace(/_x(?=[0-9a-f]{4}_)/gi, "-x").replace(/\s+/g, " ");
+  const fit = (length) => base.slice(0, length).replace(/^[\s']+|[\s']+$/g, "") || fallback;
+  let name = fit(MAX_SHEET_NAME);
+  for (let number = 2; names.has(name.toLowerCase()); number++) {
+    const suffix = ` (${number})`;
+    name = fit(MAX_SHEET_NAME - suffix.length) + suffix;
+  }
+  names.add(name.toLowerCase());
+  return name;
+}
+function worksheetXml({ x, y, energyScale, yUnit, xUnit = "eV" }, name) {
+  if (!x || !y || x.length !== y.length || x.length < 3) {
+    throw new Error(`Spectrum "${name}" requires at least three paired energy and intensity values.`);
+  }
+  if (x.length >= 1048576) throw new Error(`Spectrum "${name}" exceeds Excel's worksheet row limit.`);
+  const kinetic = energyScale === "kinetic";
+  const energyLabel = `${kinetic ? "Kinetic Energy" : "Binding Energy"} (${englishExportLabel(xUnit, "eV")})`;
+  const signalUnit = englishExportLabel(yUnit, "");
+  const intensityLabel = signalUnit ? `Measured Intensity (${signalUnit})` : "Measured Intensity";
+  const rows = [`<row r="1"><c r="A1" t="inlineStr"><is><t>${xmlText(energyLabel)}</t></is></c><c r="B1" t="inlineStr"><is><t>${xmlText(intensityLabel)}</t></is></c></row>`];
+  for (let row = 0; row < x.length; row++) {
+    const index = kinetic ? row : x.length - row - 1;
+    const energy = x[index];
+    const intensity = y[index];
+    if (!Number.isFinite(energy) || !Number.isFinite(intensity)) {
+      throw new Error(`Spectrum "${name}" contains an invalid energy or intensity value.`);
+    }
+    const address = row + 2;
+    rows.push(`<row r="${address}"><c r="A${address}"><v>${energy}</v></c><c r="B${address}"><v>${intensity}</v></c></row>`);
+  }
+  return `${XML_HEADER}<worksheet xmlns="${SPREADSHEET_NAMESPACE}"><dimension ref="A1:B${rows.length}"/><cols><col min="1" max="1" width="23" customWidth="1"/><col min="2" max="2" width="32" customWidth="1"/></cols><sheetData>${rows.join("")}</sheetData></worksheet>`;
+}
+async function spectraToXlsx(spectra) {
+  if (!spectra.length) throw new Error("Choose at least one spectrum to export.");
+  const zip = new import_jszip.default();
+  const names = /* @__PURE__ */ new Set(["history"]);
+  const sheets = [];
+  const contentTypes = [
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+  ];
+  const worksheetLinks = [];
+  const relationships2 = `${XML_HEADER}<Relationships xmlns="${PACKAGE_NAMESPACE}/relationships">`;
+  const officeRelationships = OFFICE_REL_NAMESPACES[0];
+  zip.file("_rels/.rels", relationships2 + `<Relationship Id="rId1" Type="${officeRelationships}/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+  for (const [index, spectrum] of spectra.entries()) {
+    const id = index + 1;
+    const name = worksheetName(spectrum.name, index, names);
+    const path2 = `worksheets/sheet${id}.xml`;
+    zip.file(`xl/${path2}`, worksheetXml(spectrum, name));
+    sheets.push(`<sheet name="${xmlText(name)}" sheetId="${id}" r:id="rId${id}"/>`);
+    worksheetLinks.push(`<Relationship Id="rId${id}" Type="${officeRelationships}/worksheet" Target="${path2}"/>`);
+    contentTypes.push(`<Override PartName="/xl/${path2}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`);
+  }
+  zip.file("xl/workbook.xml", `${XML_HEADER}<workbook xmlns="${SPREADSHEET_NAMESPACE}" xmlns:r="${officeRelationships}"><sheets>${sheets.join("")}</sheets></workbook>`);
+  zip.file("xl/_rels/workbook.xml.rels", `${relationships2}${worksheetLinks.join("")}</Relationships>`);
+  zip.file("[Content_Types].xml", `${XML_HEADER}<Types xmlns="${PACKAGE_NAMESPACE}/content-types">${contentTypes.join("")}</Types>`);
+  return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 
 // xps-source:src/data.js
@@ -5175,12 +5289,13 @@ var fields = [
 var peakColumns = [["center", "Center", 5], ["fwhm", "FWHM", 5], ["height", "Height", 4]];
 var si2pDoublet = { separation: 0.606, ratio: 2 };
 var maxPeaks = 12;
+var xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 var spectrumFileType = {
   description: "Spectrum files",
   accept: {
     "text/csv": [".csv"],
     "text/plain": [".tsv", ".txt", ".xy", ".dat", ".vms", ".vamas", ".npl"],
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
+    [xlsxMime]: [".xlsx"]
   }
 };
 function emptyAnalysis() {
@@ -5212,7 +5327,10 @@ function emptyProject() {
     sourceHandle: null,
     activeRegion: null,
     sessions: /* @__PURE__ */ new Map(),
-    pick: null
+    pick: null,
+    chartScope: "single",
+    overlayZoom: null,
+    overlayHidden: /* @__PURE__ */ new Set()
   };
 }
 var state = { ...emptyProject(), revision: 0, fitting: false };
@@ -5459,11 +5577,34 @@ function loadDataset(dataset, sourceHandle = null) {
   state.sourceHandle = sourceHandle;
   state.activeRegion = null;
   state.sessions.clear();
+  state.chartScope = "single";
+  state.overlayZoom = null;
+  state.overlayHidden.clear();
   const regions = dataset.regions || [];
   const select = byId("region");
   select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
   byId("region-wrap").hidden = regions.length < 2;
   selectSpectrum(0);
+}
+function shiftedSpectra() {
+  return (state.dataset.regions ?? [state.dataset]).map((spectrum, index) => {
+    const points = index === state.activeRegion ? state.points : state.sessions.get(index)?.analysis.points;
+    return {
+      name: spectrum.name,
+      energyScale: spectrum.energyScale,
+      yUnit: spectrum.yUnit,
+      x: points ? points.map(({ x }) => x) : spectrum.x,
+      y: spectrum.y
+    };
+  });
+}
+function changeChartScope(scope) {
+  if (state.chartScope === scope || scope === "all" && (state.dataset.regions?.length ?? 0) < 2) return;
+  state.chartScope = scope;
+  state.pick = null;
+  peakDrag = void 0;
+  byId("plot-coordinates").textContent = "";
+  drawChart(null);
 }
 function syncControls() {
   byId("offset").value = state.offset;
@@ -5614,6 +5755,10 @@ function getPeakHandles() {
   });
 }
 function renderChart({ updateLegend = true } = {}) {
+  if (state.chartScope === "all") {
+    renderOverlay();
+    return;
+  }
   const corrected = state.view === "corrected";
   const measurement = state.spectrum.y;
   const { fit, lines, residuals } = state.preview;
@@ -5674,6 +5819,37 @@ function renderChart({ updateLegend = true } = {}) {
     yLabel: state.spectrum.yUnit ? `Intensity (${state.spectrum.yUnit})` : "Intensity"
   });
 }
+function renderOverlay() {
+  const spectra = shiftedSpectra();
+  const scales = new Set(spectra.map(({ energyScale }) => energyScale));
+  const units = new Set(spectra.map(({ yUnit }) => yUnit));
+  const labels = /* @__PURE__ */ new Map();
+  for (const { name } of spectra) labels.set(name, (labels.get(name) ?? 0) + 1);
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  const series = spectra.map(({ name, x, y, energyScale, yUnit }, index) => {
+    minimum = Math.min(minimum, x[0]);
+    maximum = Math.max(maximum, x.at(-1));
+    const id = `spectrum-${index}`;
+    const label = [labels.get(name) > 1 ? `${name} (${index + 1})` : name];
+    if (scales.size > 1) label.push(energyScale === "kinetic" ? "KE" : "BE");
+    if (units.size > 1 && yUnit) label.push(yUnit);
+    return {
+      id,
+      label: label.join(" \xB7 "),
+      x,
+      values: y,
+      visible: !state.overlayHidden.has(id),
+      color: peakColors[index % peakColors.length],
+      dash: Math.floor(index / peakColors.length) % 2 === 1
+    };
+  });
+  const reverse = scales.size === 1 && scales.has("binding");
+  const xLabel = scales.size > 1 ? "Energy (eV)" : reverse ? "Binding energy (eV)" : "Kinetic energy (eV)";
+  const unit = units.size === 1 ? spectra[0].yUnit : "";
+  renderLegend(series);
+  drawChart({ series, zoom: state.overlayZoom ?? [minimum, maximum], reverse, xLabel, yLabel: unit ? `Intensity (${unit})` : "Intensity" });
+}
 function renderLegend(series) {
   const legend = byId("legend");
   const focusedId = legend.contains(document.activeElement) ? document.activeElement.dataset.series : null;
@@ -5692,8 +5868,16 @@ function renderLegend(series) {
 }
 function render() {
   const name = state.spectrum.name;
-  byId("chart-title").textContent = name;
-  byId("spectrum-meta").textContent = `${state.spectrum.filename || name}  \xB7  ${state.points.length.toLocaleString("en-US")} points  \xB7  ${energyName()}`;
+  const overlay = state.chartScope === "all";
+  byId("chart-title").textContent = overlay ? "All spectra" : name;
+  const detail = overlay ? `${state.dataset.regions.length} spectra` : `${state.points.length.toLocaleString("en-US")} points  \xB7  ${energyName()}`;
+  byId("spectrum-meta").textContent = `${state.spectrum.filename || name}  \xB7  ${detail}`;
+  byId("spectrum").setAttribute("aria-label", overlay ? "Overlay of measured spectra" : "Measured spectrum and fit curves");
+  byId("chart-scope").hidden = (state.dataset.regions?.length ?? 0) < 2;
+  byId("individual-display").hidden = overlay;
+  for (const button of document.querySelectorAll("[data-scope]")) {
+    button.setAttribute("aria-pressed", button.dataset.scope === state.chartScope);
+  }
   for (const button of document.querySelectorAll("[data-view]")) {
     button.setAttribute("aria-pressed", button.dataset.view === state.view);
   }
@@ -5713,6 +5897,10 @@ function renderPick() {
   byId("add-doublet").setAttribute("aria-pressed", state.pick === "doublet");
   byId("pick-reference").setAttribute("aria-pressed", state.pick === "reference");
   byId("pick-reference").classList.toggle("active", state.pick === "reference");
+  if (state.chartScope === "all") {
+    byId("plot-help").textContent = "Drag to zoom \xB7 Use Spectrum to select a measurement for analysis";
+    return;
+  }
   const primary = state.spectrum?.energyScale === "kinetic" ? "higher-kinetic-energy" : "lower-binding-energy";
   byId("plot-help").textContent = {
     peak: "Click the peak center \xB7 Press Esc to cancel",
@@ -5985,6 +6173,7 @@ function runFit() {
 var exportFormats = {
   csv: { description: "Spectrum CSV", extension: ".csv", mime: "text/csv" },
   shiftedCsv: { description: "Shifted spectrum CSV", extension: ".csv", mime: "text/csv", suffix: "-shifted" },
+  shiftedXlsx: { description: "Shifted spectra workbook", extension: ".xlsx", mime: xlsxMime, suffix: "-shifted" },
   plotproject: { description: "Plot Launcher XPS Fit project", extension: ".plotproject", mime: "application/json" },
   xpsFitCsv: { description: "Plot Launcher XPS Fit CSV", extension: ".csv", mime: "text/csv", suffix: "-xps-fit" }
 };
@@ -6060,11 +6249,13 @@ function downloadBlob(blob, filename) {
 }
 async function exportData(format) {
   if (!state.spectrum) return;
+  const workbook = format === "shiftedXlsx" ? shiftedSpectra() : null;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
   const { dataset, spectrum, sourceHandle, activeRegion } = project;
-  const stem = englishExportFilename(spectrum.filename || spectrum.name);
+  const source = workbook ? dataset : spectrum;
+  const stem = englishExportFilename(source.filename || source.name);
   const { extension, mime, description, suffix = "-xps" } = exportFormats[format];
-  const prefix = dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : "";
+  const prefix = !workbook && dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : "";
   const label = prefix ? englishExportFilename(spectrum.name, "spectrum") : stem;
   const name = prefix + label.slice(0, 120 - prefix.length - suffix.length) + suffix;
   const filename = name + extension;
@@ -6082,7 +6273,8 @@ async function exportData(format) {
         if (!pickerUnavailable(error)) throw error;
       }
     }
-    const blob = new Blob([exportPayload(project, format, name)], {
+    const payload = workbook ? await spectraToXlsx(workbook) : exportPayload(project, format, name);
+    const blob = new Blob([payload], {
       type: extension === ".csv" ? mime + ";charset=utf-8" : mime
     });
     if (destination) {
@@ -6104,6 +6296,7 @@ async function exportData(format) {
   }
 }
 function choosePeak(x) {
+  if (state.chartScope === "all") return;
   byId("plot-coordinates").textContent = `${decimal(x, 5)} eV`;
   if (state.pick === "reference") {
     byId("observed").value = decimal(x - state.offset, 8);
@@ -6131,9 +6324,13 @@ function choosePeak(x) {
   }
 }
 function setZoom(range) {
-  const count = state.points.filter(({ x }) => x >= range[0] && x <= range[1]).length;
-  if (count < 2) return;
-  state.zoom = range;
+  if (state.chartScope === "all") {
+    state.overlayZoom = range;
+  } else {
+    const count = state.points.filter(({ x }) => x >= range[0] && x <= range[1]).length;
+    if (count < 2) return;
+    state.zoom = range;
+  }
   renderChart();
 }
 function refreshPeakRow(peak) {
@@ -6271,6 +6468,12 @@ byId("demo").addEventListener("click", () => {
   runFit();
 });
 byId("region").addEventListener("change", (event) => selectSpectrum(event.target.selectedIndex));
+for (const button of document.querySelectorAll("[data-scope]")) {
+  button.addEventListener("click", () => {
+    changeChartScope(button.dataset.scope);
+    render();
+  });
+}
 byId("direct-form").addEventListener("submit", (event) => {
   event.preventDefault();
   applyShift(byId("offset").valueAsNumber);
@@ -6279,11 +6482,12 @@ byId("reference-form").addEventListener("submit", (event) => {
   event.preventDefault();
   applyShift(byId("target").valueAsNumber - byId("observed").valueAsNumber);
 });
-byId("pick-reference").addEventListener("click", () => {
-  state.pick = state.pick === "reference" ? null : "reference";
-  renderPick();
-  renderChart();
-});
+function togglePlotPick(pick) {
+  changeChartScope("single");
+  state.pick = state.pick === pick ? null : pick;
+  render();
+}
+byId("pick-reference").addEventListener("click", () => togglePlotPick("reference"));
 for (const button of document.querySelectorAll("[data-shift-mode]")) {
   button.addEventListener("click", () => {
     state.shiftMode = button.dataset.shiftMode;
@@ -6297,7 +6501,9 @@ for (const button of document.querySelectorAll("[data-view]")) {
     render();
   });
 }
-byId("reset-zoom").addEventListener("click", () => setZoom(rangeOf(state.points)));
+byId("reset-zoom").addEventListener("click", () => {
+  setZoom(state.chartScope === "all" ? null : rangeOf(state.points));
+});
 byId("background").addEventListener("change", (event) => {
   notice();
   state.method = event.target.value;
@@ -6316,17 +6522,16 @@ for (const kind of ["peak", "doublet"]) {
       toast(`Add up to ${maxPeaks} peak components.`);
       return;
     }
-    state.pick = state.pick === kind ? null : kind;
-    renderPick();
-    renderChart();
+    togglePlotPick(kind);
     if (state.pick && window.innerWidth <= 780) byId("plot").scrollIntoView({ block: "nearest", behavior: "smooth" });
   });
 }
 byId("legend").addEventListener("click", (event) => {
   const id = event.target.closest("button")?.dataset.series;
   if (!id) return;
-  if (state.disabledSeries.has(id)) state.disabledSeries.delete(id);
-  else state.disabledSeries.add(id);
+  const hidden = state.chartScope === "all" ? state.overlayHidden : state.disabledSeries;
+  if (hidden.has(id)) hidden.delete(id);
+  else hidden.add(id);
   renderChart();
 });
 byId("peak-rows").addEventListener("change", (event) => {
@@ -6379,6 +6584,7 @@ byId("peak-form").addEventListener("input", () => {
 });
 byId("export-csv").addEventListener("click", () => exportData("csv"));
 byId("export-shifted-csv").addEventListener("click", () => exportData("shiftedCsv"));
+byId("export-shifted-xlsx").addEventListener("click", () => exportData("shiftedXlsx"));
 byId("export-plot").addEventListener("click", () => exportData("plotproject"));
 byId("export-plot-csv").addEventListener("click", () => exportData("xpsFitCsv"));
 byId("show-help").addEventListener("click", () => byId("help-dialog").showModal());

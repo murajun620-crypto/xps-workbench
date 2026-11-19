@@ -6,6 +6,7 @@ import { MIN_PEAK_FWHM, movePeakHandle } from './peak-handles.js';
 import { PLOT_LAUNCHER_URL, toPlotLauncherFitCsv, toPlotLauncherProject } from './plot-launcher.js';
 import { restorePeakFromCurve } from './restore-peaks.js';
 import { installUpdateCheck } from './updates.js';
+import { spectraToXlsx } from './xlsx.js';
 import { analyzeBackground, estimatePeak, evaluateFit, fitPeaks, fitStatistics, peakArea, shiftSpectrum } from './xps.js';
 
 const byId = (id) => document.getElementById(id);
@@ -48,12 +49,13 @@ const fields = [
 const peakColumns = [['center', 'Center', 5], ['fwhm', 'FWHM', 5], ['height', 'Height', 4]];
 const si2pDoublet = { separation: 0.606, ratio: 2 };
 const maxPeaks = 12;
+const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const spectrumFileType = {
   description: 'Spectrum files',
   accept: {
     'text/csv': ['.csv'],
     'text/plain': ['.tsv', '.txt', '.xy', '.dat', '.vms', '.vamas', '.npl'],
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+    [xlsxMime]: ['.xlsx'],
   },
 };
 function emptyAnalysis() {
@@ -68,6 +70,7 @@ const analysisFields = Object.keys(emptyAnalysis());
 function emptyProject() {
   return {
     ...emptyAnalysis(), dataset: null, sourceHandle: null, activeRegion: null, sessions: new Map(), pick: null,
+    chartScope: 'single', overlayZoom: null, overlayHidden: new Set(),
   };
 }
 const state = { ...emptyProject(), revision: 0, fitting: false };
@@ -335,11 +338,34 @@ function loadDataset(dataset, sourceHandle = null) {
   state.sourceHandle = sourceHandle;
   state.activeRegion = null;
   state.sessions.clear();
+  state.chartScope = 'single';
+  state.overlayZoom = null;
+  state.overlayHidden.clear();
   const regions = dataset.regions || [];
   const select = byId('region');
   select.replaceChildren(...regions.map((region, index) => new Option(region.name, index)));
   byId('region-wrap').hidden = regions.length < 2;
   selectSpectrum(0);
+}
+
+function shiftedSpectra() {
+  return (state.dataset.regions ?? [state.dataset]).map((spectrum, index) => {
+    const points = index === state.activeRegion ? state.points : state.sessions.get(index)?.analysis.points;
+    return {
+      name: spectrum.name, energyScale: spectrum.energyScale, yUnit: spectrum.yUnit,
+      x: points ? points.map(({ x }) => x) : spectrum.x,
+      y: spectrum.y,
+    };
+  });
+}
+
+function changeChartScope(scope) {
+  if (state.chartScope === scope || (scope === 'all' && (state.dataset.regions?.length ?? 0) < 2)) return;
+  state.chartScope = scope;
+  state.pick = null;
+  peakDrag = undefined;
+  byId('plot-coordinates').textContent = '';
+  drawChart(null);
 }
 
 function syncControls() {
@@ -492,6 +518,10 @@ function getPeakHandles() {
 }
 
 function renderChart({ updateLegend = true } = {}) {
+  if (state.chartScope === 'all') {
+    renderOverlay();
+    return;
+  }
   const corrected = state.view === 'corrected';
   const measurement = state.spectrum.y;
   const { fit, lines, residuals } = state.preview;
@@ -540,6 +570,33 @@ function renderChart({ updateLegend = true } = {}) {
   });
 }
 
+function renderOverlay() {
+  const spectra = shiftedSpectra();
+  const scales = new Set(spectra.map(({ energyScale }) => energyScale));
+  const units = new Set(spectra.map(({ yUnit }) => yUnit));
+  const labels = new Map();
+  for (const { name } of spectra) labels.set(name, (labels.get(name) ?? 0) + 1);
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  const series = spectra.map(({ name, x, y, energyScale, yUnit }, index) => {
+    minimum = Math.min(minimum, x[0]);
+    maximum = Math.max(maximum, x.at(-1));
+    const id = `spectrum-${index}`;
+    const label = [labels.get(name) > 1 ? `${name} (${index + 1})` : name];
+    if (scales.size > 1) label.push(energyScale === 'kinetic' ? 'KE' : 'BE');
+    if (units.size > 1 && yUnit) label.push(yUnit);
+    return {
+      id, label: label.join(' · '), x, values: y, visible: !state.overlayHidden.has(id),
+      color: peakColors[index % peakColors.length], dash: Math.floor(index / peakColors.length) % 2 === 1,
+    };
+  });
+  const reverse = scales.size === 1 && scales.has('binding');
+  const xLabel = scales.size > 1 ? 'Energy (eV)' : reverse ? 'Binding energy (eV)' : 'Kinetic energy (eV)';
+  const unit = units.size === 1 ? spectra[0].yUnit : '';
+  renderLegend(series);
+  drawChart({ series, zoom: state.overlayZoom ?? [minimum, maximum], reverse, xLabel, yLabel: unit ? `Intensity (${unit})` : 'Intensity' });
+}
+
 function renderLegend(series) {
   const legend = byId('legend');
   const focusedId = legend.contains(document.activeElement) ? document.activeElement.dataset.series : null;
@@ -559,8 +616,17 @@ function renderLegend(series) {
 
 function render() {
   const name = state.spectrum.name;
-  byId('chart-title').textContent = name;
-  byId('spectrum-meta').textContent = `${state.spectrum.filename || name}  ·  ${state.points.length.toLocaleString('en-US')} points  ·  ${energyName()}`;
+  const overlay = state.chartScope === 'all';
+  byId('chart-title').textContent = overlay ? 'All spectra' : name;
+  const detail = overlay ? `${state.dataset.regions.length} spectra`
+    : `${state.points.length.toLocaleString('en-US')} points  ·  ${energyName()}`;
+  byId('spectrum-meta').textContent = `${state.spectrum.filename || name}  ·  ${detail}`;
+  byId('spectrum').setAttribute('aria-label', overlay ? 'Overlay of measured spectra' : 'Measured spectrum and fit curves');
+  byId('chart-scope').hidden = (state.dataset.regions?.length ?? 0) < 2;
+  byId('individual-display').hidden = overlay;
+  for (const button of document.querySelectorAll('[data-scope]')) {
+    button.setAttribute('aria-pressed', button.dataset.scope === state.chartScope);
+  }
   for (const button of document.querySelectorAll('[data-view]')) {
     button.setAttribute('aria-pressed', button.dataset.view === state.view);
   }
@@ -581,6 +647,10 @@ function renderPick() {
   byId('add-doublet').setAttribute('aria-pressed', state.pick === 'doublet');
   byId('pick-reference').setAttribute('aria-pressed', state.pick === 'reference');
   byId('pick-reference').classList.toggle('active', state.pick === 'reference');
+  if (state.chartScope === 'all') {
+    byId('plot-help').textContent = 'Drag to zoom · Use Spectrum to select a measurement for analysis';
+    return;
+  }
   const primary = state.spectrum?.energyScale === 'kinetic' ? 'higher-kinetic-energy' : 'lower-binding-energy';
   byId('plot-help').textContent = {
     peak: 'Click the peak center · Press Esc to cancel',
@@ -856,6 +926,7 @@ function runFit() {
 const exportFormats = {
   csv: { description: 'Spectrum CSV', extension: '.csv', mime: 'text/csv' },
   shiftedCsv: { description: 'Shifted spectrum CSV', extension: '.csv', mime: 'text/csv', suffix: '-shifted' },
+  shiftedXlsx: { description: 'Shifted spectra workbook', extension: '.xlsx', mime: xlsxMime, suffix: '-shifted' },
   plotproject: { description: 'Plot Launcher XPS Fit project', extension: '.plotproject', mime: 'application/json' },
   xpsFitCsv: { description: 'Plot Launcher XPS Fit CSV', extension: '.csv', mime: 'text/csv', suffix: '-xps-fit' },
 };
@@ -927,11 +998,13 @@ function downloadBlob(blob, filename) {
 
 async function exportData(format) {
   if (!state.spectrum) return;
+  const workbook = format === 'shiftedXlsx' ? shiftedSpectra() : null;
   const project = { ...state, peaks: state.peaks.map((peak) => ({ ...peak })) };
   const { dataset, spectrum, sourceHandle, activeRegion } = project;
-  const stem = englishExportFilename(spectrum.filename || spectrum.name);
+  const source = workbook ? dataset : spectrum;
+  const stem = englishExportFilename(source.filename || source.name);
   const { extension, mime, description, suffix = '-xps' } = exportFormats[format];
-  const prefix = dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : '';
+  const prefix = !workbook && dataset.regions?.length > 1 ? `${stem.slice(0, 58)}-${activeRegion + 1}-` : '';
   const label = prefix ? englishExportFilename(spectrum.name, 'spectrum') : stem;
   const name = prefix + label.slice(0, 120 - prefix.length - suffix.length) + suffix;
   const filename = name + extension;
@@ -951,7 +1024,8 @@ async function exportData(format) {
       }
     }
 
-    const blob = new Blob([exportPayload(project, format, name)], {
+    const payload = workbook ? await spectraToXlsx(workbook) : exportPayload(project, format, name);
+    const blob = new Blob([payload], {
       type: extension === '.csv' ? mime + ';charset=utf-8' : mime,
     });
     if (destination) {
@@ -973,6 +1047,7 @@ async function exportData(format) {
 }
 
 function choosePeak(x) {
+  if (state.chartScope === 'all') return;
   byId('plot-coordinates').textContent = `${decimal(x, 5)} eV`;
   if (state.pick === 'reference') {
     byId('observed').value = decimal(x - state.offset, 8);
@@ -1001,9 +1076,13 @@ function choosePeak(x) {
 }
 
 function setZoom(range) {
-  const count = state.points.filter(({ x }) => x >= range[0] && x <= range[1]).length;
-  if (count < 2) return;
-  state.zoom = range;
+  if (state.chartScope === 'all') {
+    state.overlayZoom = range;
+  } else {
+    const count = state.points.filter(({ x }) => x >= range[0] && x <= range[1]).length;
+    if (count < 2) return;
+    state.zoom = range;
+  }
   renderChart();
 }
 
@@ -1141,6 +1220,12 @@ byId('demo').addEventListener('click', () => {
   runFit();
 });
 byId('region').addEventListener('change', (event) => selectSpectrum(event.target.selectedIndex));
+for (const button of document.querySelectorAll('[data-scope]')) {
+  button.addEventListener('click', () => {
+    changeChartScope(button.dataset.scope);
+    render();
+  });
+}
 byId('direct-form').addEventListener('submit', (event) => {
   event.preventDefault();
   applyShift(byId('offset').valueAsNumber);
@@ -1149,11 +1234,12 @@ byId('reference-form').addEventListener('submit', (event) => {
   event.preventDefault();
   applyShift(byId('target').valueAsNumber - byId('observed').valueAsNumber);
 });
-byId('pick-reference').addEventListener('click', () => {
-  state.pick = state.pick === 'reference' ? null : 'reference';
-  renderPick();
-  renderChart();
-});
+function togglePlotPick(pick) {
+  changeChartScope('single');
+  state.pick = state.pick === pick ? null : pick;
+  render();
+}
+byId('pick-reference').addEventListener('click', () => togglePlotPick('reference'));
 for (const button of document.querySelectorAll('[data-shift-mode]')) {
   button.addEventListener('click', () => {
     state.shiftMode = button.dataset.shiftMode;
@@ -1167,7 +1253,9 @@ for (const button of document.querySelectorAll('[data-view]')) {
     render();
   });
 }
-byId('reset-zoom').addEventListener('click', () => setZoom(rangeOf(state.points)));
+byId('reset-zoom').addEventListener('click', () => {
+  setZoom(state.chartScope === 'all' ? null : rangeOf(state.points));
+});
 byId('background').addEventListener('change', (event) => {
   notice();
   state.method = event.target.value;
@@ -1186,17 +1274,16 @@ for (const kind of ['peak', 'doublet']) {
       toast(`Add up to ${maxPeaks} peak components.`);
       return;
     }
-    state.pick = state.pick === kind ? null : kind;
-    renderPick();
-    renderChart();
+    togglePlotPick(kind);
     if (state.pick && window.innerWidth <= 780) byId('plot').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 }
 byId('legend').addEventListener('click', (event) => {
   const id = event.target.closest('button')?.dataset.series;
   if (!id) return;
-  if (state.disabledSeries.has(id)) state.disabledSeries.delete(id);
-  else state.disabledSeries.add(id);
+  const hidden = state.chartScope === 'all' ? state.overlayHidden : state.disabledSeries;
+  if (hidden.has(id)) hidden.delete(id);
+  else hidden.add(id);
   renderChart();
 });
 byId('peak-rows').addEventListener('change', (event) => {
@@ -1250,6 +1337,7 @@ byId('peak-form').addEventListener('input', () => {
 });
 byId('export-csv').addEventListener('click', () => exportData('csv'));
 byId('export-shifted-csv').addEventListener('click', () => exportData('shiftedCsv'));
+byId('export-shifted-xlsx').addEventListener('click', () => exportData('shiftedXlsx'));
 byId('export-plot').addEventListener('click', () => exportData('plotproject'));
 byId('export-plot-csv').addEventListener('click', () => exportData('xpsFitCsv'));
 byId('show-help').addEventListener('click', () => byId('help-dialog').showModal());

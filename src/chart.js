@@ -221,24 +221,35 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
       ? (xMax - value) / span : (value - xMin) / span) * (right - left);
     const energyAt = (pixel) => model.reverse ? xMax - span * (pixel - left) / (right - left)
       : xMin + span * (pixel - left) / (right - left);
-    const x = (i) => xValue(model.x[i]);
-    const first = Math.max(0, lowerBound(model.x, xMin) - 1);
-    const last = Math.min(model.x.length - 1, lowerBound(model.x, xMax) + 1);
-    const stride = Math.max(1, Math.floor((last - first) / Math.max(800, width * 3)));
+    function plotWindow(energies) {
+      if (!energies?.length || energies[0] > xMax || energies.at(-1) < xMin) return null;
+      const first = Math.max(0, lowerBound(energies, xMin) - 1);
+      const last = Math.min(energies.length - 1, lowerBound(energies, xMax) + 1);
+      const stride = Math.max(1, Math.floor((last - first) / Math.max(800, width * 3)));
+      return { x: (i) => xValue(energies[i]), first, last, stride };
+    }
+    const sharedWindow = plotWindow(model.x);
+    const traces = model.series.map((series) => ({
+      series, window: series.x ? plotWindow(series.x) : sharedWindow,
+    })).filter((trace) => trace.window);
     let yMin = 0;
     let yMax = 0;
     let residualMax = 0;
-    for (let i = first; i <= last; i++) {
-      for (const series of model.series) {
-        // Keep a background-only or all-hidden view on the measured scale.
-        if (!series.visible && !series.primary) continue;
+    for (const { series, window: { first, last } } of traces) {
+      // Keep a background-only or all-hidden view on the measured scale.
+      if (!series.visible && !series.primary) continue;
+      for (let i = first; i <= last; i++) {
         const value = series.values[i];
         if (!Number.isFinite(value)) continue;
         yMin = Math.min(yMin, value);
         yMax = Math.max(yMax, value);
       }
-      if (Number.isFinite(model.residual?.[i])) {
-        residualMax = Math.max(residualMax, Math.abs(model.residual[i]));
+    }
+    if (model.residual && sharedWindow) {
+      for (let i = sharedWindow.first; i <= sharedWindow.last; i++) {
+        if (Number.isFinite(model.residual[i])) {
+          residualMax = Math.max(residualMax, Math.abs(model.residual[i]));
+        }
       }
     }
     if (drag?.handle) {
@@ -259,7 +270,7 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
     const residualY = (value) => (residualTop + residualBottom) / 2 - value / residualMax * (residualBottom - residualTop) / 2;
     scales = { left, top, right, bottom: residualBottom, energyAt, intensityAt, yMin, yMax, hasResidual };
 
-    if (model.range[0] > xMin || model.range[1] < xMax) {
+    if (model.range && (model.range[0] > xMin || model.range[1] < xMax)) {
       const [rangeLeft, rangeRight] = model.range.map(xValue).sort((a, b) => a - b);
       const visibleLeft = Math.max(left, Math.min(right, rangeLeft));
       const visibleRight = Math.max(left, Math.min(right, rangeRight));
@@ -303,8 +314,8 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
     ctx.beginPath();
     ctx.rect(left, top, right - left, mainBottom - top);
     ctx.clip();
-    const visible = model.series.filter((series) => series.visible);
-    for (const series of visible) {
+    const visible = traces.filter(({ series }) => series.visible);
+    for (const { series, window: { x, first, last, stride } } of visible) {
       if (!series.base) continue;
       ctx.beginPath();
       path(ctx, series.values, x, y, Math.max(first, series.start), Math.min(last, series.end), stride);
@@ -319,7 +330,8 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
       ctx.fillStyle = series.color + '30';
       ctx.fill();
     }
-    for (const series of visible.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+    visible.sort(({ series: a }, { series: b }) => (a.order ?? 0) - (b.order ?? 0));
+    for (const { series, window: { x, first, last, stride } } of visible) {
       ctx.strokeStyle = series.color;
       ctx.fillStyle = series.color;
       ctx.lineWidth = series.width ?? 1.5;
@@ -361,7 +373,8 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
     ctx.setLineDash([]);
     ctx.lineWidth = 1;
 
-    if (model.residual) {
+    if (model.residual && sharedWindow) {
+      const { x, first, last, stride } = sharedWindow;
       line(ctx, left, residualY(0), right, residualY(0), palette.zero);
       ctx.save();
       ctx.beginPath();
@@ -395,8 +408,31 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
     ctx.restore();
 
     if (pointer && !drag?.handle && !hovered && pointer.x >= left && pointer.x <= right && pointer.y >= top && pointer.y <= residualBottom) {
-      const index = nearestIndex(model.x, energyAt(pointer.x));
-      const at = x(index);
+      const energy = energyAt(pointer.x);
+      let sampleEnergy = energy;
+      let sample;
+      let label;
+      if (model.x) {
+        const index = nearestIndex(model.x, energy);
+        sampleEnergy = model.x[index];
+        sample = model.series.find((series) => series.primary)?.values[index];
+      } else if (!drag) {
+        let distance = 20 ** 2;
+        for (const { series } of visible) {
+          const index = nearestIndex(series.x, energy);
+          const sampleX = series.x[index];
+          const sampleY = series.values[index];
+          if (sampleX < xMin || sampleX > xMax || !Number.isFinite(sampleY)) continue;
+          const candidate = (xValue(sampleX) - pointer.x) ** 2 + (y(sampleY) - pointer.y) ** 2;
+          if (candidate < distance) {
+            distance = candidate;
+            sampleEnergy = sampleX;
+            sample = sampleY;
+            label = series.label;
+          }
+        }
+      }
+      const at = xValue(sampleEnergy);
       if (drag && Math.abs(pointer.x - drag.x) >= 7) {
         ctx.fillStyle = '#9985ff2f';
         ctx.fillRect(Math.min(drag.x, pointer.x), top, Math.abs(pointer.x - drag.x), residualBottom - top);
@@ -405,10 +441,9 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
         line(ctx, at, top, at, residualBottom, palette.hover);
         ctx.setLineDash([]);
       }
-      const sample = model.series.find((series) => series.primary)?.values[index];
       if (Number.isFinite(sample)) {
         tooltip.hidden = false;
-        tooltip.textContent = `${formatTick(model.x[index])} eV · ${formatTick(sample)}`;
+        tooltip.textContent = `${label ? `${label} · ` : ''}${formatTick(sampleEnergy)} eV · ${formatTick(sample)}`;
         tooltip.style.left = `${Math.max(4, Math.min(at + 10, width - tooltip.offsetWidth - 5))}px`;
         tooltip.style.top = `${Math.max(7, pointer.y - 32)}px`;
         return;
@@ -472,7 +507,7 @@ export function createSpectrumChart(canvas, tooltip, onPick, onZoom, onHandleDra
       const to = Math.min(scales.right, Math.max(scales.left, point(event).x));
       if (Math.abs(to - drag.x) >= 7) {
         onZoom([scales.energyAt(drag.x), scales.energyAt(to)].sort((a, b) => a - b));
-      } else {
+      } else if (model.x) {
         onPick(model.x[nearestIndex(model.x, scales.energyAt(to))]);
       }
       drag = null;
